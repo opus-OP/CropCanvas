@@ -13,10 +13,39 @@ const { ffmpegPath } = require("./lib/ffmpeg-path");
 
 const CONFIG_DIR = path.join(__dirname, "config");
 const ASSETS_DIR = path.join(__dirname, "assets");
-const TEMPLATE_FILES = {
-  template1: path.join(CONFIG_DIR, "template1.json"),
-  template2: path.join(CONFIG_DIR, "template2.json"),
-};
+
+// ---------- template store (scanned config/*.json, ids are file basenames) ----------
+
+function listTemplateFiles() {
+  let files;
+  try {
+    files = fs.readdirSync(CONFIG_DIR);
+  } catch (e) {
+    console.error("config dir read failed:", e);
+    return [];
+  }
+  return files
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => path.join(CONFIG_DIR, f));
+}
+
+function safeId(id) {
+  return id && /^[a-zA-Z0-9_-]+$/.test(id) ? id : null;
+}
+
+function templatePath(id) {
+  const safe = safeId(id);
+  return safe ? path.join(CONFIG_DIR, safe + ".json") : null;
+}
+
+function emptyTemplate(name) {
+  return {
+    name,
+    nameEn: name,
+    canvas: { width: 1080, height: 1920 },
+    zones: [],
+  };
+}
 
 let mainWindow = null;
 let uiLang = app.getLocale && app.getLocale().toLowerCase().includes("ru") ? "ru" : "en";
@@ -33,6 +62,7 @@ const UI_STRINGS = {
   videoFilter: { ru: "Видео", en: "Video" },
   allFiles: { ru: "Все файлы", en: "All files" },
   renderBusy: { ru: "Рендер уже идёт", en: "A render is already running" },
+  emptyTemplate: { ru: "В шаблоне нет зон", en: "Template has no zones" },
 };
 
 function tr(key) {
@@ -70,7 +100,7 @@ function send(channel, payload) {
 
 // ---------- ffmpeg render ----------
 
-function renderVideo({ videoPath, templateId, zones, outputDir }, cb) {
+function renderVideo({ videoPath, templateId, zones, outputDir, resolution }, cb) {
   const outFileName = `shorts_${new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19)}.mp4`;
   const outPath = path.join(outputDir, outFileName);
 
@@ -89,6 +119,8 @@ function renderVideo({ videoPath, templateId, zones, outputDir }, cb) {
     outPath,
     probe: video,
     zones,
+    canvasW: resolution && resolution.w,
+    canvasH: resolution && resolution.h,
   });
 
   const proc = spawn(ffmpegPath(), args, { windowsHide: true });
@@ -154,7 +186,9 @@ ipcMain.handle("dialog:selectOutputDir", async () => {
 
 ipcMain.handle("config:list", () => {
   const out = {};
-  for (const [id, file] of Object.entries(TEMPLATE_FILES)) {
+  for (const file of listTemplateFiles()) {
+    const id = path.basename(file, ".json");
+    if (!safeId(id)) continue;
     try {
       out[id] = JSON.parse(fs.readFileSync(file, "utf8"));
       out[id].id = id;
@@ -166,8 +200,8 @@ ipcMain.handle("config:list", () => {
 });
 
 ipcMain.handle("config:save", (_evt, { id, zones }) => {
-  if (!TEMPLATE_FILES[id]) return { ok: false, error: "unknown template" };
-  const file = TEMPLATE_FILES[id];
+  const file = templatePath(id);
+  if (!file || !fs.existsSync(file)) return { ok: false, error: "unknown template" };
   let current = {};
   try {
     current = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -183,17 +217,84 @@ ipcMain.handle("config:save", (_evt, { id, zones }) => {
   }
 });
 
+function readTemplateJson(file) {
+  try {
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    data.id = path.basename(file, ".json");
+    return data;
+  } catch (e) {
+    return { error: String(e), id: path.basename(file, ".json") };
+  }
+}
+
+function writeTemplate(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
+}
+
+function uniqueId(base) {
+  let id = base;
+  let n = 1;
+  while (fs.existsSync(templatePath(id))) {
+    id = `${base}_${++n}`;
+  }
+  return id;
+}
+
+ipcMain.handle("template:create", (_evt, { name }) => {
+  const clean = typeof name === "string" && name.trim() ? name.trim() : null;
+  if (!clean) return { ok: false, error: "name required" };
+  const id = uniqueId("custom");
+  const file = templatePath(id);
+  if (!file) return { ok: false, error: "invalid id" };
+  try {
+    writeTemplate(file, emptyTemplate(clean));
+    return { ok: true, id };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+ipcMain.handle("template:duplicate", (_evt, { id }) => {
+  const src = templatePath(id);
+  if (!src || !fs.existsSync(src)) return { ok: false, error: "unknown template" };
+  const srcData = readTemplateJson(src);
+  if (srcData.error) return { ok: false, error: srcData.error };
+  const newId = uniqueId(`${srcData.id}_copy`);
+  const file = templatePath(newId);
+  const suffix = uiLang === "ru" ? " (копия)" : " (copy)";
+  const copy = { ...srcData, id: newId };
+  if (typeof copy.name === "string") copy.name += suffix;
+  if (typeof copy.nameEn === "string") copy.nameEn += suffix;
+  try {
+    writeTemplate(file, copy);
+    return { ok: true, id: newId };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
+ipcMain.handle("template:delete", (_evt, { id }) => {
+  const file = templatePath(id);
+  if (!file || !fs.existsSync(file)) return { ok: false, error: "unknown template" };
+  try {
+    fs.unlinkSync(file);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+});
+
 ipcMain.handle("probe:video", (_evt, filePath) => probeVideo(filePath));
 
 let renderBusy = false;
 
 ipcMain.handle("render:start", (_evt, payload) =>
   new Promise((resolve, reject) => {
-    const { videoPath, templateId, zones, outputDir } = payload;
-    if (renderBusy) return reject(new Error(tr("renderBusy")));
+const { videoPath, templateId, zones, outputDir, resolution } = payload;
+    if (!zones || !zones.length) return reject(new Error(tr("emptyTemplate")));
     renderBusy = true;
     try {
-      renderVideo({ videoPath, templateId, zones, outputDir }, (ev) => {
+      renderVideo({ videoPath, templateId, zones, outputDir, resolution }, (ev) => {
         if (ev.ok === null) {
           send("render:progress", ev);
         } else {

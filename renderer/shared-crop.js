@@ -95,11 +95,29 @@
     return fitRectToAspect({ x, y, w: newW, h: newH }, aspect, minW);
   }
 
+  // Масштаб out-областей зон из базового холста (fromW/fromH) в целевое
+  // разрешение (toW/toH). Используется при смене разрешения/рендере:
+  // превью и ffmpeg-граф работают с одинаковыми пиксельными out-координатами.
+  function scaleZones(zones, fromW, fromH, toW, toH) {
+    const sx = toW / fromW;
+    const sy = toH / fromH;
+    return zones.map((z) => {
+      let w = Math.max(1, Math.round(z.out.w * sx));
+      let h = Math.max(1, Math.round(z.out.h * sy));
+      if (w > toW) w = toW;
+      if (h > toH) h = toH;
+      const x = Math.min(Math.max(0, Math.round(z.out.x * sx)), toW - w);
+      const y = Math.min(Math.max(0, Math.round(z.out.y * sy)), toH - h);
+      return { id: z.id, label: z.label, labelEn: z.labelEn, color: z.color, out: { x, y, w, h }, crop: z.crop };
+    });
+  }
+
   return {
     zoneAspectNorm,
     zoneSrcRect,
     fitRectToAspect,
     reshapeToAspect,
     resizeWithAspect,
+    scaleZones,
   };
 });

@@ -25,9 +25,23 @@ const videoInfo = $("#videoInfo");
 const renderStatus = $("#renderStatus");
 const progressFill = $("#progressFill");
 const progressText = $("#progressText");
+const resSelect = $("#resSelect");
+const btnNewTemplate = $("#btnNewTemplate");
+const btnDupTemplate = $("#btnDupTemplate");
+const btnDelTemplate = $("#btnDelTemplate");
+const modal = $("#modal");
+const modalTitle = $("#modalTitle");
+const modalInput = $("#modalInput");
+const modalOk = $("#modalOk");
+const modalCancel = $("#modalCancel");
 
-const CANVAS_W = 1080;
-const CANVAS_H = 1920;
+const RES_PRESETS = [
+  { label: "1080×1920", w: 1080, h: 1920 },
+  { label: "720×1280", w: 720, h: 1280 },
+  { label: "2160×3840", w: 2160, h: 3840 },
+  { label: "1080×1080", w: 1080, h: 1080 },
+  { label: "1920×1080", w: 1920, h: 1080 },
+];
 const MIN_PX = 16;
 const HANDLE_HINTS = {
   nw: { x: -1, y: -1 },
@@ -46,8 +60,8 @@ const state = {
   videoPath: null,
   probe: null,
   templates: {},
-  order: ["template1", "template2"],
   currentId: null,
+  res: { w: 1080, h: 1920 },
   rects: new Map(), // zoneId -> { el, handles:Set }
   overlay: null,
   tw: null,
@@ -79,7 +93,7 @@ async function initTabs() {
   const cfgs = await window.api.listConfigs();
   state.templates = cfgs;
   templateTabs.innerHTML = "";
-  state.order.forEach((id) => {
+  Object.keys(cfgs).forEach((id) => {
     const t = cfgs[id];
     if (!t || t.error) return;
     const btn = document.createElement("button");
@@ -88,10 +102,24 @@ async function initTabs() {
     btn.addEventListener("click", () => switchTemplate(id));
     templateTabs.appendChild(btn);
   });
+  if (!state.currentId && Object.keys(cfgs).length) {
+    switchTemplate(Object.keys(cfgs)[0]);
+  }
 }
 
 function currentTemplate() {
   return state.templates[state.currentId];
+}
+
+function currentCanvas() {
+  const t = currentTemplate();
+  return t && t.canvas ? t.canvas : { width: 1080, height: 1920 };
+}
+
+function scaledZones() {
+  const t = currentTemplate();
+  const c = currentCanvas();
+  return window.CropMath.scaleZones(t.zones, c.width, c.height, state.res.w, state.res.h);
 }
 
 function switchTemplate(id) {
@@ -295,13 +323,14 @@ function saveConfigNow() {
 
 function drawOutput() {
   outCtx.fillStyle = "#000";
-  outCtx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  outCtx.fillRect(0, 0, state.res.w, state.res.h);
   const t = currentTemplate();
   if (!t) return;
 
   const videoReady = video.videoWidth > 0 && video.readyState >= 2;
+  const zones = scaledZones();
 
-  t.zones.forEach((z) => {
+  zones.forEach((z) => {
     const { x, y, w, h } = z.out;
     outCtx.fillStyle = z.color;
     outCtx.globalAlpha = 0.12;
@@ -330,13 +359,13 @@ function drawOutput() {
   });
 
   if (state.tw && state.tw.complete && state.tw.naturalWidth > 0) {
-    const w = CANVAS_W / 2;
+    const w = state.res.w / 2;
     const h = state.tw.naturalHeight * (w / state.tw.naturalWidth);
-    outCtx.drawImage(state.tw, (CANVAS_W - w) / 2, 0, w, h);
+    outCtx.drawImage(state.tw, (state.res.w - w) / 2, 0, w, h);
   }
 
   if (state.overlay && state.overlay.complete && state.overlay.naturalWidth > 0) {
-    outCtx.drawImage(state.overlay, 0, 0, CANVAS_W, CANVAS_H);
+    outCtx.drawImage(state.overlay, 0, 0, state.res.w, state.res.h);
   }
 }
 
@@ -463,7 +492,8 @@ timeline.addEventListener("input", () => {
 // ---------- render ----------
 
 function updateRenderEnabled() {
-  btnRender.disabled = !(state.videoPath && currentTemplate());
+  const t = currentTemplate();
+  btnRender.disabled = !(state.videoPath && t && t.zones && t.zones.length > 0);
 }
 
 btnRender.addEventListener("click", startRender);
@@ -480,7 +510,8 @@ async function startRender() {
   const payload = {
     videoPath: state.videoPath,
     templateId: state.currentId,
-    zones: sanitizeZonesForSave(currentTemplate()),
+    zones: scaledZones(),
+    resolution: state.res,
     outputDir: dir,
   };
 
@@ -501,7 +532,7 @@ window.api.onRenderDone((res) => {
 });
 
 function finishRender(ok, msg) {
-  btnRender.disabled = !(state.videoPath && currentTemplate());
+  updateRenderEnabled();
   if (ok) {
     progressFill.style.background = "var(--ok)";
     progressText.textContent = window.I18n.i18n("renderDone") + msg;
@@ -525,6 +556,103 @@ function loadOverlay() {
   state.tw = tw;
 }
 
+// ---------- resolution ----------
+
+function initResolution() {
+  RES_PRESETS.forEach((p, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = p.label;
+    resSelect.appendChild(opt);
+  });
+  const saved = localStorage.getItem("res");
+  let idx = 0;
+  if (saved) {
+    const m = /^(\d+)x(\d+)$/.exec(saved);
+    if (m) {
+      const found = RES_PRESETS.findIndex((p) => p.w === +m[1] && p.h === +m[2]);
+      if (found >= 0) idx = found;
+    }
+  }
+  resSelect.value = String(idx);
+  const p = RES_PRESETS[idx];
+  state.res = { w: p.w, h: p.h };
+  applyResolution();
+}
+
+resSelect.addEventListener("change", () => {
+  const p = RES_PRESETS[Number(resSelect.value)];
+  state.res = { w: p.w, h: p.h };
+  localStorage.setItem("res", p.w + "x" + p.h);
+  applyResolution();
+});
+
+function applyResolution() {
+  outCanvas.width = state.res.w;
+  outCanvas.height = state.res.h;
+  outCanvas.style.aspectRatio = state.res.w + " / " + state.res.h;
+  redraw();
+  updateRenderEnabled();
+}
+
+// ---------- template actions ----------
+
+function askName(title) {
+  return new Promise((resolve) => {
+    modalTitle.textContent = title;
+    modalInput.value = "";
+    modal.hidden = false;
+    modalInput.focus();
+    const done = (val) => {
+      modal.hidden = true;
+      modalOk.removeEventListener("click", onOk);
+      modalCancel.removeEventListener("click", onCancel);
+      modalInput.removeEventListener("keydown", onKey);
+      resolve(val);
+    };
+    const onOk = () => done(modalInput.value.trim() || null);
+    const onCancel = () => done(null);
+    const onKey = (e) => {
+      if (e.key === "Enter") done(modalInput.value.trim() || null);
+      if (e.key === "Escape") done(null);
+    };
+    modalOk.addEventListener("click", onOk);
+    modalCancel.addEventListener("click", onCancel);
+    modalInput.addEventListener("keydown", onKey);
+  });
+}
+
+async function reloadAndSwitch(newId) {
+  await initTabs();
+  if (newId && state.templates[newId]) switchTemplate(newId);
+  updateRenderEnabled();
+}
+
+btnNewTemplate.addEventListener("click", async () => {
+  const name = await askName(window.I18n.i18n("modalTitle"));
+  if (!name) return;
+  const res = await window.api.createTemplate(name);
+  if (res.ok) await reloadAndSwitch(res.id);
+});
+
+btnDupTemplate.addEventListener("click", async () => {
+  if (!state.currentId) return;
+  const res = await window.api.duplicateTemplate(state.currentId);
+  if (res.ok) await reloadAndSwitch(res.id);
+});
+
+btnDelTemplate.addEventListener("click", async () => {
+  if (!state.currentId) return;
+  const t = currentTemplate();
+  const label = t ? window.I18n.locName(t) : state.currentId;
+  if (!window.confirm(window.I18n.i18n("deleteConfirm") + label + "?")) return;
+  const res = await window.api.deleteTemplate(state.currentId);
+  if (res.ok) {
+    state.currentId = null;
+    await reloadAndSwitch(null);
+  }
+});
+
 // ---------- init ----------
 
 new ResizeObserver(() => {
@@ -536,8 +664,8 @@ btnLoadVideo.addEventListener("click", loadVideo);
 
 (async function init() {
   window.I18n.initI18n();
+  initResolution();
   await initTabs();
-  if (!state.currentId) switchTemplate("template1");
   loadOverlay();
 })();
 

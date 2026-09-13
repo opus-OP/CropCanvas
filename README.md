@@ -12,7 +12,10 @@ your system locale.
 ## Features
 
 - Crop-zone templates (Tabs **Template 1 / Template 2**), zones defined in `config/*.json`
-- Live output preview on a 1080×1920 canvas that matches the render pipeline
+- **Your own templates**: create, duplicate and delete templates right from the toolbar
+- **Selectable output resolution** (1080×1920, 720×1280, 2160×3840, 1080×1080, 1920×1080) —
+  zones are scaled to the chosen size in preview and in the rendered file
+- Live output preview on a canvas that matches the render pipeline
 - Drag / resize zones with aspect preserved
 - Automatic crop reshaping to zone aspect on load/switch
 - Rendering via **bundled** `ffmpeg`/`ffprobe` (`ffmpeg-static`, `ffprobe-static`) —

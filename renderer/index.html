@@ -14,8 +14,13 @@
       <span id="videoInfo" class="muted" data-i18n="videoNotLoaded">no video loaded</span>
       <div class="spacer"></div>
       <div id="templateTabs"></div>
+      <button id="btnNewTemplate" data-i18n="newTemplate" title="New template">➕ New</button>
+      <button id="btnDupTemplate" data-i18n="duplicateTemplate" title="Duplicate">🔁 Copy</button>
+      <button id="btnDelTemplate" data-i18n="deleteTemplate" title="Delete">🗑 Delete</button>
       <div class="gap"></div>
       <div id="renderBlock">
+        <label id="resLabel" for="resSelect" data-i18n="resLabel">📒 Resolution</label>
+        <select id="resSelect"></select>
         <button id="btnRender" disabled data-i18n="render">🎬 Render</button>
         <div id="renderStatus" hidden>
           <div id="progressBar"><div id="progressFill"></div></div>
@@ -48,6 +53,19 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <div id="modal" hidden>
+    <div class="modalBackdrop">
+      <div class="modalBox">
+        <div class="modalTitle" id="modalTitle"></div>
+        <input id="modalInput" type="text" />
+        <div class="modalBtns">
+          <button id="modalOk" data-i18n="ok">OK</button>
+          <button id="modalCancel" data-i18n="cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="shared-crop.js"></script>

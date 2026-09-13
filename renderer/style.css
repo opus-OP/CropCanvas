@@ -233,3 +233,74 @@ section {
 }
 
 .muted { color: var(--muted); }
+
+/* ---------- resolution ---------- */
+
+#resLabel { font-size: 13px; color: var(--muted); white-space: nowrap; }
+
+#resSelect {
+  appearance: none;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#templateTabs button {
+  white-space: nowrap;
+}
+
+#btnNewTemplate, #btnDupTemplate, #btnDelTemplate { white-space: nowrap; }
+
+/* ---------- template name modal ---------- */
+
+#modal[hidden] { display: none; }
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modalBox {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .6);
+}
+.modalTitle { font-size: 14px; font-weight: 600; }
+#modalInput {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+#modalInput:focus { outline: none; border-color: var(--accent); }
+.modalBtns { display: flex; justify-content: flex-end; gap: 8px; }
+.modalBtns button {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.modalBtns button:first-child {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}

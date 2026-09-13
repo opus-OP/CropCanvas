@@ -2,7 +2,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert");
-const { zoneSrcRect, zoneAspectNorm, fitRectToAspect, reshapeToAspect, resizeWithAspect } =
+const { zoneSrcRect, zoneAspectNorm, fitRectToAspect, reshapeToAspect, resizeWithAspect, scaleZones } =
   require("../renderer/shared-crop");
 
 const approx = (a, b, eps = 0.02) => Math.abs(a - b) < eps;
@@ -155,4 +155,31 @@ test("zoneSrcRect: source rect offsets -> dest rect совпадает по ра
     Math.abs(destW - out.w) <= 2 || Math.abs(destH - out.h) <= 2,
     "хотя бы одна ось совпадает после cover"
   );
+});
+
+// ---------- scaleZones ----------
+
+test("scaleZones: 1080x1920 -> 720x1280 пропорционально уменьшает out", () => {
+  const zones = [
+    { id: "a", out: { x: 0, y: 0, w: 1080, h: 232 } },
+    { id: "b", out: { x: 0, y: 232, w: 1080, h: 608 } },
+    { id: "c", out: { x: 0, y: 840, w: 1080, h: 1080 } },
+  ];
+  const r = scaleZones(zones, 1080, 1920, 720, 1280);
+  assert.strictEqual(r.length, 3);
+  const last = r[2];
+  assert.strictEqual(last.out.x, 0);
+  assert.strictEqual(last.out.y, 560);
+  assert.strictEqual(last.out.w, 720);
+  assert.strictEqual(last.out.h, 720, "заполняет весь холст по высоте");
+  assert.ok(r.every((z) => z.out.x >= 0 && z.out.y >= 0 && z.out.x + z.out.w <= 720 && z.out.y + z.out.h <= 1280));
+});
+
+test("scaleZones: 1080x1920 -> 1080x1080 ограничивает зоны в рамки холста", () => {
+  const zones = [{ id: "a", out: { x: 0, y: 0, w: 1080, h: 1920 } }];
+  const r = scaleZones(zones, 1080, 1920, 1080, 1080);
+  assert.strictEqual(r[0].out.w, 1080);
+  assert.ok(r[0].out.h <= 1080, "высота клампится к 1080");
+  assert.strictEqual(r[0].out.x, 0);
+  assert.strictEqual(r[0].out.y, 0);
 });

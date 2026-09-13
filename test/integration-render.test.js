@@ -11,6 +11,7 @@ const {
   buildRenderArgs,
 } = require("../lib/ffmpeg-graph");
 const { ffmpegPath, ffprobePath } = require("../lib/ffmpeg-path");
+const { scaleZones } = require("../renderer/shared-crop");
 
 const ROOT = path.join(__dirname, "..");
 const OVERLAY = path.join(ROOT, "assets", "overlay.png");
@@ -101,4 +102,24 @@ test("интеграция: рендер обоих шаблонов через 
     assert.ok(a, `${id}: есть аудио-поток`);
     assert.strictEqual(a.codec_name, "aac", `${id}: аудиокодек aac`);
   }
+
+  const cfg1 = JSON.parse(fs.readFileSync(path.join(ROOT, "config", "template1.json"), "utf8"));
+  const scaledZones1 = scaleZones(loadZones("template1"), cfg1.canvas.width, cfg1.canvas.height, 720, 1280);
+  const out720 = path.join(workdir, "template1_720.mp4");
+  const args720 = buildRenderArgs({
+    videoPath: src,
+    overlayPath: OVERLAY,
+    twPath: TW,
+    outPath: out720,
+    probe,
+    zones: scaledZones1,
+    canvasW: 720,
+    canvasH: 1280,
+  });
+  const r720 = run(ffmpegPath(), args720);
+  assert.strictEqual(r720.code, 0, "720x1280 render. stderr:\n" + r720.stderr);
+  const v720 = (probeOut(out720).streams || []).find((st) => st.codec_type === "video");
+  assert.ok(v720, "720: есть видео-поток");
+  assert.strictEqual(v720.width, 720, "720x1280 render: ширина 720");
+  assert.strictEqual(v720.height, 1280, "720x1280 render: высота 1280");
 });

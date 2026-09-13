@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld("api", {
   probeVideo: (filePath) => ipcRenderer.invoke("probe:video", filePath),
   renderStart: (opts) => ipcRenderer.invoke("render:start", opts),
   setLocale: (locale) => ipcRenderer.send("app:set-locale", locale),
+  createTemplate: (name) => ipcRenderer.invoke("template:create", { name }),
+  duplicateTemplate: (id) => ipcRenderer.invoke("template:duplicate", { id }),
+  deleteTemplate: (id) => ipcRenderer.invoke("template:delete", { id }),
   onRenderProgress: (cb) =>
     ipcRenderer.on("render:progress", (_evt, data) => cb(data)),
   onRenderDone: (cb) => ipcRenderer.on("render:done", (_evt, data) => cb(data)),
