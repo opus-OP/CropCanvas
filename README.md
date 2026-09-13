@@ -1,67 +1,66 @@
-# CropCanvas — сборщик шортсов по шаблону
+# CropCanvas — Shorts template builder
 
-Десктоп-приложение (Electron) для сборки коротких вертикальных роликов из одного
-исходного видео по переиспользуемым шаблонам кропа. Рисуете зоны кропа на исходнике,
-превью результата повторяет точную ffmpeg-цепочку, и один клик рендерит `.mp4`
-1080×1920 (H.264 + AAC).
+English | [Русский](./README.ru.md)
 
-Интерфейс **двуязычный EN/RU** — переключается кнопкой 🌐 в тулбаре, по умолчанию
-язык системы.
+Desktop app (Electron) for building shorts from one source video using reusable
+crop templates. Draw crop zones on the source video, the output preview mirrors the
+exact ffmpeg filter chain, and one click renders a 1080×1920 H.264+AAC `.mp4`.
 
-## Возможности
+UI is bilingual **EN/RU** — switch with the 🌐 button in the toolbar; defaults to
+your system locale.
 
-- Шаблоны зон кропа (вкладки **Шаблон 1 / Шаблон 2**), зоны описаны в `config/*.json`
-- Живое превью на холсте 1080×1920, полностью совпадающее с пайплайном рендера
-- Перетаскивание и изменение размеров зон с сохранением пропорций
-- Автоприведение кропа к пропорциям зоны при загрузке/переключении шаблона
-- Рендер через **встроенные** бинарники `ffmpeg`/`ffprobe`
-  (`ffmpeg-static`, `ffprobe-static`) — системная установка не нужна;
-  есть фолбэк на системные утилиты, если они установлены
-- Опциональный оверлей (`assets/overlay.png`) и водяной знак по центру сверху
-  (`assets/tw.png`)
+## Features
 
-## Требования
+- Crop-zone templates (Tabs **Template 1 / Template 2**), zones defined in `config/*.json`
+- Live output preview on a 1080×1920 canvas that matches the render pipeline
+- Drag / resize zones with aspect preserved
+- Automatic crop reshaping to zone aspect on load/switch
+- Rendering via **bundled** `ffmpeg`/`ffprobe` (`ffmpeg-static`, `ffprobe-static`) —
+  no system install required; falls back to system binaries if present
+- Optional overlay (`assets/overlay.png`) and top-center watermark (`assets/tw.png`)
 
-- Node.js 18+ (рекомендуется LTS) — https://nodejs.org
-- ffmpeg **не обязателен**: приложение использует встроенные статические бинарники.
-  Если хотите использовать свою системную сборку — оставьте `ffmpeg`/`ffprobe`
-  в `PATH` и удалите `ffmpeg-static`/`ffprobe-static`.
+## Requirements
 
-## Запуск
+- Node.js 18+ (LTS recommended) — https://nodejs.org
+- ffmpeg is **optional**: the app bundles static binaries. If you prefer your
+  system build, keep `ffmpeg`/`ffprobe` in `PATH` and uninstall `ffmpeg-static`
+  `ffprobe-static`.
+
+## Run
 
 ```bash
 npm install
-./run.sh        # Linux/macOS/Windows (git-bash) — на Linux сам определяет Wayland
-# или
-npm start       # обычный electron
+./run.sh        # Linux/macOS/Windows(git-bash) — detects Wayland on Linux
+# or
+npm start       # plain electron
 ```
 
-Заметки для Linux:
-- Флаги Wayland добавляются автоматически при обнаружении Wayland-сессии.
-  Отключить: `WAYLAND=0 ./run.sh`; флаги-обходы GPU: `GPU_FLAGS=0 ./run.sh`.
+Linux notes:
+- Wayland flags are added automatically when a Wayland session is detected.
+  Override with `WAYLAND=0 ./run.sh`; GPU workarounds off: `GPU_FLAGS=0 ./run.sh`.
 
-## Тесты
+## Test
 
 ```bash
 npm test
 ```
 
-Интеграционный тест рендера использует встроенный ffmpeg — системной установки не требует.
+Integration render test uses the bundled ffmpeg and needs no system install.
 
-## Структура проекта
+## Project layout
 
 ```
-main.js                 Electron main: диалоги, IPC, пайплайн рендера
+main.js                 Electron main: dialogs, IPC, render pipeline
 preload.js              contextBridge API
 renderer/               UI (index.html, style.css, app.js, shared-crop.js, i18n.js)
-lib/ffmpeg-graph.js     ffprobe-пробинг + построение ffmpeg-графа
-lib/ffmpeg-path.js      выбор встроенного или системного бинарника
-config/template*.json   зоны кропа (метки RU + EN)
+lib/ffmpeg-graph.js     ffprobe probe + ffmpeg filter graph builder
+lib/ffmpeg-path.js      resolve bundled system / static binaries
+config/template*.json   crop zones (RU + EN labels)
 assets/                 overlay.png, tw.png
-scripts/gen-overlay.py  генерация прозрачного холста-оверлея
-test/                   unit- и интеграционные тесты
+scripts/gen-overlay.py  regenerate the transparent overlay canvas
+test/                   unit + integration tests
 ```
 
-## Лицензия
+## License
 
 MIT
