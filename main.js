@@ -128,18 +128,29 @@ function renderVideo({ videoPath, templateId, zones, outputDir, resolution }, cb
   let buf = "";
   let lastProgress = -1;
 
+  let pbuf = "";
+  proc.stdout.on("data", (chunk) => {
+    pbuf += chunk.toString();
+    const lines = pbuf.split("\n");
+    pbuf = lines.pop();
+    for (const line of lines) {
+      if (line.startsWith("out_time_us=")) {
+        const usec = parseInt(line.slice("out_time_us=".length), 10);
+        if (video.duration && Number.isFinite(usec)) {
+          const t = usec / 1e6;
+          const pct = Math.min(100, Math.round((t / video.duration) * 100));
+          if (pct !== lastProgress) {
+            lastProgress = pct;
+            cb({ ok: null, progress: pct });
+          }
+        }
+      }
+    }
+  });
+
   proc.stderr.on("data", (chunk) => {
     buf += chunk.toString();
     if (buf.length > 65536) buf = buf.slice(-32768);
-    const m = buf.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
-    if (m && video.duration) {
-      const t = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
-      const pct = Math.min(100, Math.round((t / video.duration) * 100));
-      if (pct !== lastProgress) {
-        lastProgress = pct;
-        cb({ ok: null, progress: pct });
-      }
-    }
   });
 
   proc.on("error", (err) => {
