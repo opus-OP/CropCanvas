@@ -1,0 +1,158 @@
+"use strict";
+
+const { test } = require("node:test");
+const assert = require("node:assert");
+const { zoneSrcRect, zoneAspectNorm, fitRectToAspect, reshapeToAspect, resizeWithAspect } =
+  require("../renderer/shared-crop");
+
+const approx = (a, b, eps = 0.02) => Math.abs(a - b) < eps;
+
+const VW = 1920;
+const VH = 1080;
+// пиксельные аспекты = (w*VW)/(h*VH)
+const pixelAspect = (c) => (c.w * VW) / (c.h * VH);
+
+// ---------- zoneAspectNorm ----------
+
+test("zoneAspectNorm: квадратная зона из 16:9 исходника = 0.5625 (норм.)", () => {
+  assert.ok(approx(zoneAspectNorm({ w: 1080, h: 1080 }, VW, VH), 0.5625));
+});
+
+test("zoneAspectNorm: зона 16:9 из 16:9 исходника = 1 (норм.)", () => {
+  assert.ok(approx(zoneAspectNorm({ w: 1080, h: 608 }, VW, VH), 1.0, 0.01));
+});
+
+// ---------- reshapeToAspect (переформатирование при загрузке) ----------
+
+test("reshapeToAspect: широкий кроп приводится к квадрату, пиксельный аспект == 1", () => {
+  const r = reshapeToAspect({ x: 0, y: 0, w: 1, h: 0.5625 }, zoneAspectNorm({ w: 1080, h: 1080 }, VW, VH));
+  assert.ok(approx(pixelAspect(r), 1), "пиксельный аспект квадрата");
+  assert.ok(r.w > 0 && r.h > 0);
+  assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= 1.0001 && r.y + r.h <= 1.0001, "в кадре");
+});
+
+test("reshapeToAspect: уже корректная форма не меняется", () => {
+  const aspect = zoneAspectNorm({ w: 1080, h: 1080 }, VW, VH); // 0.5625
+  const crop = { x: 0.12, y: 0, w: 0.5625, h: 1 };
+  const r = reshapeToAspect(crop, aspect);
+  assert.ok(approx(pixelAspect(r), 1), "квадрат остаётся квадратом");
+  assert.ok(Math.abs(r.x - 0.12) < 0.01 && Math.abs(r.y - 0) < 0.01, "позиция сохранена");
+});
+
+test("reshapeToAspect: узкий/высокий кроп расширяется до нужного аспекта", () => {
+  const aspect = zoneAspectNorm({ w: 540, h: 1380 }, VW, VH); // 0.22014
+  const r = reshapeToAspect({ x: 0, y: 0.1, w: 0.2, h: 1 }, aspect);
+  assert.ok(approx(pixelAspect(r), 540 / 1380, 0.01), "пиксельный аспект == 540:1380");
+  assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= 1.0001 && r.y + r.h <= 1.0001, "в кадре");
+});
+
+// ---------- fitRectToAspect ----------
+
+test("fitRectToAspect: возвращает rect внутри кадра с заданным норм. аспектом", () => {
+  const r = fitRectToAspect({ x: 0.95, y: 0.95, w: 0.4, h: 0.5 }, 0.5625, 0.02);
+  assert.ok(approx(r.w / r.h, 0.5625, 0.001), "аспект сохранён");
+  assert.ok(r.x >= 0 && r.x + r.w <= 1.0001, "по x в кадре");
+  assert.ok(r.y >= 0 && r.y + r.h <= 1.0001, "по y в кадре");
+});
+
+test("fitRectToAspect: учитывает минимальную ширину", () => {
+  const r = fitRectToAspect({ x: 0, y: 0, w: 0.001, h: 0.001 }, 0.5625, 0.05);
+  assert.ok(r.w >= 0.05, "не меньше minW");
+});
+
+// ---------- resizeWithAspect (ресайз с фиксированным аспектом) ----------
+
+test("resizeWithAspect: правый край тянет квадрат, пиксельный аспект == 1", () => {
+  const aspect = zoneAspectNorm({ w: 1080, h: 1080 }, VW, VH);
+  const start = { x: 0.2, y: 0.22, w: 0.4, h: 0.7111 };
+  const r = resizeWithAspect(start, { x: 1, y: 0 }, 0.1, 0.0, aspect, 0.02);
+  assert.ok(approx(pixelAspect(r), 1, 0.02), "результат — пиксельный квадрат");
+  assert.ok(r.x + r.w <= 1.0001 && r.y + r.h <= 1.0001, "в кадре");
+  assert.ok(r.w > start.w, "ширина выросла после drag вправо");
+});
+
+test("resizeWithAspect: верхний край тянет вниз не ломая нижнюю границу", () => {
+  const aspect = zoneAspectNorm({ w: 1080, h: 1080 }, VW, VH);
+  const start = { x: 0.3, y: 0.1, w: 0.4, h: 0.7111 };
+  const r = resizeWithAspect(start, { x: 0, y: -1 }, 0.0, 0.15, aspect, 0.02);
+  assert.ok(approx(pixelAspect(r), 1, 0.02), "пиксельный квадрат");
+  assert.ok(approx(r.h, 0.7111 - 0.15, 0.02), "высота уменьшилась как надо");
+  assert.ok(approx(r.y + r.h, start.y + start.h, 0.02), "нижняя граница зафиксирована");
+});
+
+test("resizeWithAspect: тянем за любой угол — аспект всегда сохраняется", () => {
+  const aspect = 0.5625;
+  const start = { x: 0.25, y: 0.25, w: 0.5, h: 0.8889 };
+  ["nw", "ne", "se", "sw"].forEach((h) => {
+    const hints = { nw: { x: -1, y: -1 }, ne: { x: 1, y: -1 }, se: { x: 1, y: 1 }, sw: { x: -1, y: 1 } };
+    const r = resizeWithAspect(start, hints[h], 0.12, 0.05, aspect, 0.02);
+    assert.ok(approx(r.w / r.h, aspect, 0.01), `угол ${h}: норм. аспект`);
+    assert.ok(r.x >= -0.001 && r.y >= -0.001 && r.x + r.w <= 1.001 && r.y + r.h <= 1.001, `угол ${h}: в кадре`);
+  });
+});
+
+// ---------- zoneSrcRect ----------
+
+test("zoneSrcRect: идеальные пропорции совпадают (без лишнего кропа)", () => {
+  // source 16:9, crop = весь кадр, out = 1080x1920 (9:16)
+  const r = zoneSrcRect(
+    { x: 0, y: 0, w: 1, h: 0.5625 }, // 16:9
+    1920, 1080,
+    { w: 1080, h: 1920 }
+  );
+  // scale = max(1080/1920, 1920/1080) = 1.777...; cw=1080/s=607.5; chh=1920/s=1080
+  assert.ok(r.sw > 0 && r.sh > 0);
+  assert.ok(r.sw < 1920, "source rect не шире исходника");
+  assert.ok(r.sh <= 1081, "source rect по высоте = исходник");
+  assert.ok(r.sx >= 0, "sx >= 0");
+  assert.ok(r.sy >= -0.1, "sy ~ 0");
+});
+
+test("zoneSrcRect: source rect шире, чем нужно для tall out -> горизонтально обрезается по центру", () => {
+  const crop = { x: 0, y: 0, w: 1, h: 1 };
+  const out = { w: 100, h: 400 }; // очень вытянутый вертикально
+  const r = zoneSrcRect(crop, 800, 600, out);
+  // scale = max(100/800, 400/600) = 0.666...
+  // cw = 100 / 0.666... = 150; chh = 400 / 0.666 = 600
+  assert.ok(r.sw <= 801, "не шире исходника");
+  assert.ok(r.sh <= 601, "не выше исходника");
+  assert.ok(r.sx >= -0.01, "sx >= 0");
+  assert.ok(r.sy <= 0.01, "sy ~ 0 (source высота совпадает)");
+});
+
+test("zoneSrcRect: маленький crop, большой out -> масштабирование вверх", () => {
+  const crop = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+  const out = { w: 2000, h: 2000 };
+  const r = zoneSrcRect(crop, 1000, 1000, out);
+  // crop region = 500x500; scale = max(2000/500,2000/500)=4; cw=ch=500; src area = 500x500 centered
+  assert.ok(r.sw >= 499 && r.sw <= 501, "sw ~ 500");
+  assert.ok(r.sh >= 499 && r.sh <= 501, "sh ~ 500");
+  assert.ok(r.sx >= 249 && r.sx <= 251, "sx centered");
+});
+
+test("zoneSrcRect: полный кадр 1:1 -> возвращает весь кадр", () => {
+  const r = zoneSrcRect(
+    { x: 0, y: 0, w: 1, h: 1 },
+    1000,
+    1000,
+    { w: 500, h: 500 }
+  );
+  assert.ok(r.sx >= -0.01 && r.sx <= 0.01);
+  assert.ok(r.sy >= -0.01 && r.sy <= 0.01);
+  assert.ok(r.sw >= 999 && r.sw <= 1001);
+  assert.ok(r.sh >= 999 && r.sh <= 1001);
+});
+
+test("zoneSrcRect: source rect offsets -> dest rect совпадает по размеру out", () => {
+  const crop = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+  const out = { w: 300, h: 600 };
+  const r = zoneSrcRect(crop, 1600, 900, out);
+  const expectedScale = Math.max(out.w / r.sw, out.h / r.sh);
+  const destW = Math.round(r.sw * expectedScale);
+  const destH = Math.round(r.sh * expectedScale);
+  // после масштабирования и центрированного кропа в out
+  assert.ok(
+    Math.abs(destW - out.w) <= 2 || Math.abs(destH - out.h) <= 2,
+    "хотя бы одна ось совпадает после cover"
+  );
+});

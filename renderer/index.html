@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' file: data: blob:; media-src 'self' file: data: blob:;" />
+  <title data-i18n="appTitle">Shorts template builder</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <button id="btnLoadVideo" data-i18n="loadVideo">📁 Load video</button>
+      <span id="videoInfo" class="muted" data-i18n="videoNotLoaded">no video loaded</span>
+      <div class="spacer"></div>
+      <div id="templateTabs"></div>
+      <div class="gap"></div>
+      <div id="renderBlock">
+        <button id="btnRender" disabled data-i18n="render">🎬 Render</button>
+        <div id="renderStatus" hidden>
+          <div id="progressBar"><div id="progressFill"></div></div>
+          <span id="progressText"></span>
+        </div>
+      </div>
+      <div class="gap"></div>
+      <button id="langToggle" title="Language / Язык">🌐</button>
+    </header>
+
+    <main id="panels">
+      <section id="sourcePanel">
+        <div class="sectionTitle" data-i18n="sourceTitle">Source video — crop layout</div>
+        <div id="sourceStage">
+          <video id="sourceVideo" preload="metadata"></video>
+          <div id="rectLayer"></div>
+        </div>
+        <div id="playback">
+          <button id="btnPlay" data-i18n-title="playPauseTitle" title="Play / pause">▶</button>
+          <input id="timeline" type="range" min="0" max="1000" value="0" disabled />
+          <span id="timeLabel" class="muted">0:00 / 0:00</span>
+        </div>
+        <div id="zoneLegend"></div>
+      </section>
+
+      <section id="outputPanel">
+        <div class="sectionTitle" data-i18n="outputTitle">Output template preview (canvas grid 1080×1920)</div>
+        <div id="canvasWrap">
+          <canvas id="outputCanvas" width="1080" height="1920"></canvas>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="shared-crop.js"></script>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

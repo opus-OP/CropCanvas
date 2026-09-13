@@ -1,0 +1,64 @@
+{
+  "name": "Шаблон 2",
+  "nameEn": "Template 2",
+  "canvas": {
+    "width": 1080,
+    "height": 1920
+  },
+  "zones": [
+    {
+      "id": "top_full",
+      "label": "Верх (полный)",
+      "labelEn": "Top (full)",
+      "color": "#60a5fa",
+      "out": {
+        "x": 0,
+        "y": 0,
+        "w": 1080,
+        "h": 540
+      },
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 0.8889
+      }
+    },
+    {
+      "id": "bottom_left",
+      "label": "Низ слева",
+      "labelEn": "Bottom left",
+      "color": "#fbbf24",
+      "out": {
+        "x": 0,
+        "y": 540,
+        "w": 540,
+        "h": 1380
+      },
+      "crop": {
+        "x": 0.1399,
+        "y": 0,
+        "w": 0.2201,
+        "h": 1
+      }
+    },
+    {
+      "id": "bottom_right",
+      "label": "Низ справа",
+      "labelEn": "Bottom right",
+      "color": "#34d399",
+      "out": {
+        "x": 540,
+        "y": 540,
+        "w": 540,
+        "h": 1380
+      },
+      "crop": {
+        "x": 0.6399,
+        "y": 0,
+        "w": 0.2201,
+        "h": 1
+      }
+    }
+  ]
+}

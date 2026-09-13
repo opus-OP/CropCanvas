@@ -1,0 +1,23 @@
+{
+  "name": "shorts-template-builder",
+  "version": "1.0.0",
+  "description": "Cross-platform desktop app to build shorts from a single source video template. EN/RU UI.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.2.0"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "ffmpeg-static@5.3.0": true
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0"
+  }
+}
