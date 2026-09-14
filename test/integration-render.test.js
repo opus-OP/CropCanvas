@@ -11,7 +11,7 @@ const {
   buildRenderArgs,
 } = require("../lib/ffmpeg-graph");
 const { ffmpegPath, ffprobePath } = require("../lib/ffmpeg-path");
-const { scaleZones } = require("../renderer/shared-crop");
+const { scaleZones, zoneAspectNorm, centerCropForAspect } = require("../renderer/shared-crop");
 
 const ROOT = path.join(__dirname, "..");
 const OVERLAY = path.join(ROOT, "assets", "overlay.png");
@@ -48,6 +48,34 @@ function probeOut(filePath) {
     { encoding: "utf8" }
   );
   return JSON.parse(r.stdout);
+}
+
+function extractFrame(srcPath, tSec, outPath) {
+  return run(ffmpegPath(), [
+    "-y", "-v", "error",
+    "-i", srcPath,
+    "-ss", String(tSec),
+    "-frames:v", "1",
+    outPath,
+  ]);
+}
+
+function makeAnimatedZone(probe) {
+  const out = { x: 0, y: 0, w: 360, h: 640 };
+  const aspect = zoneAspectNorm(out, probe.width, probe.height);
+  const P = centerCropForAspect(aspect);
+  return [{
+    id: "anim",
+    label: "Anim",
+    labelEn: "Anim",
+    color: "#f87171",
+    out,
+    crop: { ...P },
+    keys: [
+      { t: 0, crop: { ...P } },
+      { t: 2, crop: { x: P.x + P.w * 0.25, y: P.y + P.h * 0.25, w: P.w * 0.5, h: P.h * 0.5 } },
+    ],
+  }];
 }
 
 test("интеграция: рендер обоих шаблонов через реальный ffmpeg даёт mp4 1080x1920 h264+aac", (t) => {
@@ -122,4 +150,53 @@ test("интеграция: рендер обоих шаблонов через 
   assert.ok(v720, "720: есть видео-поток");
   assert.strictEqual(v720.width, 720, "720x1280 render: ширина 720");
   assert.strictEqual(v720.height, 1280, "720x1280 render: высота 1280");
+});
+
+test("интеграция: анимированная зона (pan/zoom по ключам) рендерится и кадры во времени различаются", (t) => {
+  if (!hasBin(ffmpegPath()) || !hasBin(ffprobePath())) {
+    t.skip("ffmpeg/ffprobe не найдены");
+    return;
+  }
+
+  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), "crop-anim-"));
+  t.after(() => fs.rmSync(workdir, { recursive: true, force: true }));
+
+  const src = path.join(workdir, "src.mp4");
+  const s = run(ffmpegPath(), [
+    "-y", "-v", "error",
+    "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30:duration=2",
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
+    src,
+  ]);
+  assert.strictEqual(s.code, 0, "генерация исходника: " + s.stderr);
+
+  const probe = probeVideo(src);
+  assert.strictEqual(probe.error, undefined);
+  const zones = makeAnimatedZone(probe);
+
+  const outPath = path.join(workdir, "anim.mp4");
+  const args = buildRenderArgs({
+    videoPath: src,
+    overlayPath: OVERLAY,
+    twPath: TW,
+    outPath,
+    probe,
+    zones,
+  });
+  const r = run(ffmpegPath(), args);
+  assert.strictEqual(r.code, 0, "анимированный рендер. stderr:\n" + r.stderr);
+  assert.ok(fs.existsSync(outPath) && fs.statSync(outPath).size > 1000, "файл непустой");
+
+  const v = (probeOut(outPath).streams || []).find((st) => st.codec_type === "video");
+  assert.ok(v, "видео-поток есть");
+  assert.strictEqual(v.width, 1080, "canvas ширина 1080");
+  assert.strictEqual(v.height, 1920, "canvas высота 1920");
+
+  const fa = path.join(workdir, "a.png");
+  const fb = path.join(workdir, "b.png");
+  assert.strictEqual(extractFrame(outPath, 0.2, fa).code, 0, "кадр a");
+  assert.strictEqual(extractFrame(outPath, 1.6, fb).code, 0, "кадр b");
+  const d1 = fs.readFileSync(fa);
+  const d2 = fs.readFileSync(fb);
+  assert.ok(!d1.equals(d2), "кадры в разные моменты времени различаются (анимация работает)");
 });

@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld("api", {
   openVideo: () => ipcRenderer.invoke("dialog:openVideo"),
   selectOutputDir: () => ipcRenderer.invoke("dialog:selectOutputDir"),
   listConfigs: () => ipcRenderer.invoke("config:list"),
-  saveConfig: (id, zones) => ipcRenderer.invoke("config:save", { id, zones }),
+  saveTemplate: (id, template) => ipcRenderer.invoke("config:save-template", { id, template }),
   probeVideo: (filePath) => ipcRenderer.invoke("probe:video", filePath),
   renderStart: (opts) => ipcRenderer.invoke("render:start", opts),
   setLocale: (locale) => ipcRenderer.send("app:set-locale", locale),

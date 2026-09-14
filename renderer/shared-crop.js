@@ -108,8 +108,117 @@
       if (h > toH) h = toH;
       const x = Math.min(Math.max(0, Math.round(z.out.x * sx)), toW - w);
       const y = Math.min(Math.max(0, Math.round(z.out.y * sy)), toH - h);
-      return { id: z.id, label: z.label, labelEn: z.labelEn, color: z.color, out: { x, y, w, h }, crop: z.crop };
+      return { id: z.id, label: z.label, labelEn: z.labelEn, color: z.color, out: { x, y, w, h }, crop: z.crop, keys: z.keys };
     });
+  }
+
+  // Максимальный центрированный кроп под аспект зоны: по сути reshapeToAspect
+  // всего кадра. Дефолтный crop для новой зоны при добавлении в редакторе.
+  function centerCropForAspect(aspect) {
+    return reshapeToAspect({ x: 0, y: 0, w: 1, h: 1 }, aspect);
+  }
+
+  // ---------- keyframes (по хронометражу) ----------
+
+  // Сортировка ключей по t, схлопывание соседних с одинаковым t (оставляем первый).
+  // Возвращает новый массив; ключ = { t, crop:{x,y,w,h} }.
+  function sortKeys(keys) {
+    const arr = (Array.isArray(keys) ? keys : []).slice();
+    arr.sort((a, b) => (Number(a.t) || 0) - (Number(b.t) || 0));
+    const out = [];
+    for (const k of arr) {
+      if (!k || !k.crop) continue;
+      if (out.length && Math.abs(out[out.length - 1].t - (Number(k.t) || 0)) < 1e-9) continue;
+      out.push({ t: Number(k.t) || 0, crop: k.crop });
+    }
+    return out;
+  }
+
+  // Нормализованный список ключей зоны; старые зоны без keys мигрируют в 2
+  // идентичных ключа (t=0 и t=1e9) — поведение остаётся статичным.
+  function zoneKeys(z) {
+    if (!z) return [];
+    const keys = sortKeys(z.keys);
+    if (keys.length >= 2) return keys;
+    const crop = z.crop && z.crop.w > 0 && z.crop.h > 0
+      ? z.crop
+      : { x: 0, y: 0, w: 1, h: 1 };
+    if (keys.length === 1) {
+      return [{ t: 0, crop: { ...keys[0].crop } }, { t: 1e9, crop: { ...keys[0].crop } }];
+    }
+    return [
+      { t: 0, crop: { x: crop.x, y: crop.y, w: crop.w, h: crop.h } },
+      { t: 1e9, crop: { x: crop.x, y: crop.y, w: crop.w, h: crop.h } },
+    ];
+  }
+
+  function lerpNum(a, b, f) {
+    return a + (b - a) * f;
+  }
+
+  // Кусочно-линейная интерполяция кропа по хронометражу. До первого ключа и
+  // после последнего — значение крайнего. Используется и в превью, и в рендере
+  // (порядок: множитель по t → координаты кадра → аспект зоны сохраняется, т.к.
+  // ключи уже приведены к аспекту зоны).
+  function interpCropN(keys, t) {
+    const ks = zoneKeys({ keys });
+    if (!ks.length) return { x: 0, y: 0, w: 1, h: 1 };
+    const time = Number.isFinite(t) ? t : 0;
+    if (time <= ks[0].t) return { ...ks[0].crop };
+    const last = ks[ks.length - 1];
+    if (time >= last.t) return { ...last.crop };
+    for (let i = 0; i < ks.length - 1; i++) {
+      const a = ks[i];
+      const b = ks[i + 1];
+      if (time < a.t || time > b.t) continue;
+      const f = (b.t - a.t) > 1e-9 ? (time - a.t) / (b.t - a.t) : 0;
+      return {
+        x: +lerpNum(a.crop.x, b.crop.x, f).toFixed(4),
+        y: +lerpNum(a.crop.y, b.crop.y, f).toFixed(4),
+        w: +lerpNum(a.crop.w, b.crop.w, f).toFixed(4),
+        h: +lerpNum(a.crop.h, b.crop.h, f).toFixed(4),
+      };
+    }
+    return { ...last.crop };
+  }
+
+  // Все ли ключи зоны одинаковы по значению (т.е. фактически статично).
+  function keysAreStatic(keys) {
+    const ks = zoneKeys({ keys });
+    if (ks.length <= 1) return true;
+    const c0 = ks[0].crop;
+    return ks.every((k) =>
+      Math.abs(k.crop.x - c0.x) < 1e-6 &&
+      Math.abs(k.crop.y - c0.y) < 1e-6 &&
+      Math.abs(k.crop.w - c0.w) < 1e-6 &&
+      Math.abs(k.crop.h - c0.h) < 1e-6
+    );
+  }
+
+  // Кламп-копия out-области в границы холста canvasW×canvasH с минимальными
+  // размерами. Возвращает целочисленные пиксельные координаты базового холста.
+  function fitOutRect(r, canvasW, canvasH, minW, minH) {
+    const mw = Math.min(minW, canvasW);
+    const mh = Math.min(minH, canvasH);
+    let w = Math.max(mw, Math.min(Math.round(r.w), canvasW));
+    let h = Math.max(mh, Math.min(Math.round(r.h), canvasH));
+    let x = Math.round(clampNum(r.x, 0, canvasW - w));
+    let y = Math.round(clampNum(r.y, 0, canvasH - h));
+    return { x, y, w, h };
+  }
+
+  // Дефолтное расположение новой зоны в редакторе раскладки: пол-холста,
+  // каскадный сдвиг, чтобы N-я зона не совпадала с предыдущими.
+  function placeNewZoneRect(canvasW, canvasH, count) {
+    const w = Math.round(canvasW / 2);
+    const h = Math.round(canvasH / 2);
+    const step = 48;
+    const off = 32 + (count % 6) * step;
+    return fitOutRect({ x: off, y: off, w, h }, canvasW, canvasH, 80, 80);
+  }
+
+  function clampNum(v, lo, hi) {
+    return Math.min(hi, Math.max(lo, v));
   }
 
   return {
@@ -119,5 +228,12 @@
     reshapeToAspect,
     resizeWithAspect,
     scaleZones,
+    centerCropForAspect,
+    fitOutRect,
+    placeNewZoneRect,
+    zoneKeys,
+    sortKeys,
+    interpCropN,
+    keysAreStatic,
   };
 });

@@ -14,9 +14,31 @@ const stage = $("#sourceStage");
 const rectLayer = $("#rectLayer");
 const outCanvas = $("#outputCanvas");
 const outCtx = outCanvas.getContext("2d");
+const canvasWrap = $("#canvasWrap");
+const outRectLayer = $("#outRectLayer");
+const zonePanel = $("#zonePanel");
+const zoneList = $("#zoneList");
+const zoneProps = $("#zoneProps");
+const tplName = $("#tplName");
+const tplNameEn = $("#tplNameEn");
+const btnAddZone = $("#btnAddZone");
+const zoneLabel = $("#zoneLabel");
+const zoneLabelEn = $("#zoneLabelEn");
+const zoneColor = $("#zoneColor");
+const zoneOx = $("#zoneOx");
+const zoneOy = $("#zoneOy");
+const zoneOw = $("#zoneOw");
+const zoneOh = $("#zoneOh");
+const btnZoneUp = $("#btnZoneUp");
+const btnZoneDown = $("#btnZoneDown");
+const btnDelZone = $("#btnDelZone");
 const timeline = $("#timeline");
 const btnPlay = $("#btnPlay");
 const timeLabel = $("#timeLabel");
+const keyTrack = $("#keyTrack");
+const keyTrackWrap = $("#keyTrackWrap");
+const keyTrackPlayhead = $("#keyTrackPlayhead");
+const btnDelKey = $("#btnDelKey");
 const btnLoadVideo = $("#btnLoadVideo");
 const btnRender = $("#btnRender");
 const templateTabs = $("#templateTabs");
@@ -43,6 +65,8 @@ const RES_PRESETS = [
   { label: "1920×1080", w: 1920, h: 1080 },
 ];
 const MIN_PX = 16;
+const MIN_OUT = 16;
+const ZONE_PALETTE = ["#9147ff", "#4ade80", "#f87171", "#38bdf8", "#fbbf24", "#f472b6", "#34d399", "#fb923c"];
 const HANDLE_HINTS = {
   nw: { x: -1, y: -1 },
   n: { x: 0, y: -1 },
@@ -61,8 +85,11 @@ const state = {
   probe: null,
   templates: {},
   currentId: null,
+  currentZoneId: null,
+  selKeyT: null, // выбранный ключевой кадр (t) текущей зоны
   res: { w: 1080, h: 1920 },
   rects: new Map(), // zoneId -> { el, handles:Set }
+  outRects: new Map(), // zoneId -> el (editor layout layer)
   overlay: null,
   tw: null,
 };
@@ -85,6 +112,52 @@ function metrics() {
     offX: (elW - vw * scale) / 2,
     offY: (elH - vh * scale) / 2,
   };
+}
+
+// ---------- keyframe helpers ----------
+
+function trackDuration() {
+  const d = video.duration;
+  if (d && isFinite(d) && d > 0) return d;
+  const p = state.probe && state.probe.duration;
+  return p && isFinite(p) && p > 0 ? p : 1;
+}
+
+// Кроп зоны на момент времени t (линейная интерполяция ключей).
+function cropAtTime(z, t) {
+  return window.CropMath.interpCropN(z.keys, t);
+}
+
+// Убедиться, что у всех ключей зоны кроп приведён к аспекту out (после
+// изменения раскладки на выходе).
+function reshapeZoneKeysToAspect(z) {
+  const aspect = window.CropMath.zoneAspectNorm(z.out, video.videoWidth || 1920, video.videoHeight || 1080);
+  z.keys = window.CropMath.zoneKeys(z).map((k) => ({
+    t: k.t,
+    crop: window.CropMath.reshapeToAspect(k.crop, aspect),
+  }));
+  if (z.keys.length) z.crop = { ...z.keys[0].crop };
+}
+
+// Целевой ключ для правки прямоугольника на исходнике в момент t: выбранный
+// ключ (если его время == t), иначе существующий ключ в t, иначе новый ключ.
+function editTargetKey(z, t) {
+  let ks = window.CropMath.zoneKeys(z);
+  const time = Math.min(Math.max(0, t), trackDuration());
+  if (state.selKeyT != null && ks.some((k) => Math.abs(k.t - state.selKeyT) < 1e-6)) {
+    const hit = ks.find((k) => Math.abs(k.t - state.selKeyT) < 1e-6);
+    return { key: hit, created: false };
+  }
+  let hit = ks.find((k) => Math.abs(k.t - time) < 0.02);
+  if (!hit) {
+    const crop = cropAtTime(z, time);
+    hit = { t: time, crop };
+    ks = window.CropMath.sortKeys(ks.concat(hit));
+    z.keys = ks;
+    hit = ks.find((k) => Math.abs(k.t - time) < 0.02);
+  }
+  state.selKeyT = hit.t;
+  return { key: hit, created: true };
 }
 
 // ---------- templates / tabs ----------
@@ -126,13 +199,24 @@ function switchTemplate(id) {
   if (!state.templates[id]) return;
   saveConfigNow();
   state.currentId = id;
+  state.currentZoneId = null;
+  state.selKeyT = null;
   // кропы всегда приводим к аспекту своих зон (квадрат для 1:1, 16:9 для 16:9 и т.д.)
   shapeCropsToZoneAspect();
   templateTabs.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", b.dataset.id === id);
   });
+  rebuildTemplateUI();
+}
+
+function rebuildTemplateUI() {
   rebuildRectLayer();
+  rebuildOutLayer();
+  buildZoneList();
   buildLegend();
+  buildKeyTrack();
+  updateTemplateNameInputs();
+  updateZoneProps();
   redraw();
   updateRenderEnabled();
 }
@@ -144,7 +228,11 @@ function shapeCropsToZoneAspect() {
   const vh = video.videoHeight || 1080;
   t.zones.forEach((z) => {
     const aspect = window.CropMath.zoneAspectNorm(z.out, vw, vh);
-    z.crop = window.CropMath.reshapeToAspect(z.crop, aspect);
+    z.keys = window.CropMath.zoneKeys(z).map((k) => ({
+      t: k.t,
+      crop: window.CropMath.reshapeToAspect(k.crop, aspect),
+    }));
+    if (z.keys.length) z.crop = { ...z.keys[0].crop };
   });
 }
 
@@ -203,18 +291,20 @@ function rebuildRectLayer() {
     state.rects.set(z.id, el);
     positionRect(z);
   });
+  applySelection();
 }
 
 function positionRect(z) {
   const el = state.rects.get(z.id);
   if (!el) return;
   const m = metrics();
+  const c = cropAtTime(z, video.currentTime);
   const px = (n) => m.offX + n * m.vw * m.scale;
   const py = (n) => m.offY + n * m.vh * m.scale;
-  el.style.left = px(z.crop.x) + "px";
-  el.style.top = py(z.crop.y) + "px";
-  el.style.width = px(z.crop.w) - m.offX + "px";
-  el.style.height = py(z.crop.h) - m.offY + "px";
+  el.style.left = px(c.x) + "px";
+  el.style.top = py(c.y) + "px";
+  el.style.width = px(c.x + c.w) - m.offX + "px";
+  el.style.height = py(c.y + c.h) - m.offY + "px";
 }
 
 function repositionAll() {
@@ -228,7 +318,10 @@ function repositionAll() {
 function beginInteraction(e, zone, handleName) {
   if (!video.videoWidth) return;
   e.preventDefault();
-  const start = { ...zone.crop };
+  const tk = editTargetKey(zone, video.currentTime);
+  const edit = tk.key.crop;
+  buildKeyTrack();
+  const start = { ...edit };
   const m = metrics();
   const px0 = e.clientX;
   const py0 = e.clientY;
@@ -262,12 +355,13 @@ function beginInteraction(e, zone, handleName) {
       );
     }
 
-    Object.assign(zone.crop, {
+    Object.assign(edit, {
       x: +c.x.toFixed(4),
       y: +c.y.toFixed(4),
       w: +c.w.toFixed(4),
       h: +c.h.toFixed(4),
     });
+    zone.crop = { ...edit };
     positionRect(zone);
     redraw();
     scheduleSave();
@@ -285,6 +379,531 @@ function beginInteraction(e, zone, handleName) {
   addEventListener("pointerup", onUp);
 }
 
+// ---------- output layout editor (out rects) ----------
+
+function currentCanvasSize() {
+  const c = currentCanvas();
+  return { w: c.width || 1080, h: c.height || 1920 };
+}
+
+function layoutOutStage() {
+  if (!canvasWrap || !outRectLayer) return;
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  const cRect = outCanvas.getBoundingClientRect();
+  outRectLayer.style.left = cRect.left - wrapRect.left + "px";
+  outRectLayer.style.top = cRect.top - wrapRect.top + "px";
+  outRectLayer.style.width = cRect.width + "px";
+  outRectLayer.style.height = cRect.height + "px";
+  positionOutRects();
+}
+
+function positionOutRect(z) {
+  const el = state.outRects.get(z.id);
+  if (!el) return;
+  const c = currentCanvasSize();
+  const sc = window.CropMath.scaleZones([z], c.w, c.h, state.res.w, state.res.h)[0];
+  const r = outRectLayer.getBoundingClientRect();
+  const wFrac = sc.out.w / state.res.w;
+  const hFrac = sc.out.h / state.res.h;
+  el.style.left = (sc.out.x / state.res.w) * r.width + "px";
+  el.style.top = (sc.out.y / state.res.h) * r.height + "px";
+  el.style.width = wFrac * r.width + "px";
+  el.style.height = hFrac * r.height + "px";
+}
+
+function positionOutRects() {
+  const t = currentTemplate();
+  if (!t) return;
+  t.zones.forEach(positionOutRect);
+}
+
+function rebuildOutLayer() {
+  outRectLayer.innerHTML = "";
+  state.outRects.clear();
+  const t = currentTemplate();
+  if (!t) return;
+  t.zones.forEach((z, i) => {
+    const el = document.createElement("div");
+    el.className = "outRect";
+    el.style.setProperty("--rcolor", z.color);
+
+    const label = document.createElement("span");
+    label.className = "out-label";
+    label.textContent = String(i + 1);
+    el.appendChild(label);
+
+    Object.keys(HANDLE_HINTS).forEach((h) => {
+      const hd = document.createElement("div");
+      hd.className = "handle";
+      hd.dataset.h = h;
+      el.appendChild(hd);
+    });
+
+    el.addEventListener("pointerdown", (e) => {
+      if (e.target.classList.contains("handle")) return;
+      beginOutInteraction(e, z, null);
+    });
+    el.querySelectorAll(".handle").forEach((hd) => {
+      hd.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+        beginOutInteraction(e, z, hd.dataset.h);
+      });
+    });
+
+    outRectLayer.appendChild(el);
+    state.outRects.set(z.id, el);
+    positionOutRect(z);
+  });
+  applySelection();
+}
+
+outRectLayer.addEventListener("pointerdown", (e) => {
+  if (!e.target.closest(".outRect")) selectZone(null);
+});
+
+function beginOutInteraction(e, zone, handleName) {
+  const t = currentTemplate();
+  if (!t) return;
+  e.preventDefault();
+  selectZone(zone.id);
+  const target = e.target.closest(".outRect");
+  target.setPointerCapture(e.pointerId);
+  target.classList.add("dragging");
+
+  const start = { ...zone.out };
+  const c = currentCanvasSize();
+  const px0 = e.clientX;
+  const py0 = e.clientY;
+  const toBase = (dx, dy) => {
+    const r = outRectLayer.getBoundingClientRect();
+    return { x: (dx / r.width) * c.w, y: (dy / r.height) * c.h };
+  };
+
+  const onMove = (ev) => {
+    const d = toBase(ev.clientX - px0, ev.clientY - py0);
+    let next;
+    if (!handleName) {
+      next = { x: start.x + d.x, y: start.y + d.y, w: start.w, h: start.h };
+    } else {
+      const hx = HANDLE_HINTS[handleName].x;
+      const hy = HANDLE_HINTS[handleName].y;
+      next = { ...start };
+      if (hx === -1) { next.x = start.x + d.x; next.w = start.w - d.x; }
+      else if (hx === 1) { next.w = start.w + d.x; }
+      if (hy === -1) { next.y = start.y + d.y; next.h = start.h - d.y; }
+      else if (hy === 1) { next.h = start.h + d.y; }
+    }
+    Object.assign(zone.out, window.CropMath.fitOutRect(next, c.w, c.h, MIN_OUT, MIN_OUT));
+    positionOutRects();
+    redraw();
+    updateZoneProps();
+    scheduleSave();
+  };
+
+  const onUp = () => {
+    target.classList.remove("dragging");
+    target.releasePointerCapture(e.pointerId);
+    removeEventListener("pointermove", onMove);
+    removeEventListener("pointerup", onUp);
+    if (video.videoWidth) {
+      reshapeZoneKeysToAspect(zone);
+      positionRect(zone);
+      redraw();
+    }
+    saveConfigNow();
+  };
+
+  addEventListener("pointermove", onMove);
+  addEventListener("pointerup", onUp);
+}
+
+// ---------- zone selection & properties ----------
+
+function selectedZone() {
+  const t = currentTemplate();
+  return (t && t.zones.find((z) => z.id === state.currentZoneId)) || null;
+}
+
+function zoneIndex() {
+  const t = currentTemplate();
+  return t ? t.zones.findIndex((z) => z.id === state.currentZoneId) : -1;
+}
+
+function selectZone(id) {
+  state.currentZoneId = id;
+  state.selKeyT = null;
+  applySelection();
+  updateZoneProps();
+  buildKeyTrack();
+}
+
+function applySelection() {
+  const sel = state.currentZoneId;
+  state.rects.forEach((el, id) => el.classList.toggle("selected", id === sel));
+  state.outRects.forEach((el, id) => el.classList.toggle("selected", id === sel));
+  zoneList.querySelectorAll(".zoneTag").forEach((el) => {
+    el.classList.toggle("active", el.dataset.id === sel);
+  });
+}
+
+// ---------- keyframe track (по хронометражу) ----------
+
+function buildKeyTrack() {
+  const t = currentTemplate();
+  keyTrack.innerHTML = "";
+  btnDelKey.hidden = !(state.selKeyT != null);
+  if (!t) return;
+  const dur = trackDuration();
+  t.zones.forEach((z) => {
+    const color = z.color || "#9147ff";
+    window.CropMath.zoneKeys(z).forEach((k) => {
+      const el = document.createElement("div");
+      el.className = "keyMarker";
+      el.style.setProperty("--rcolor", color);
+      el.style.background = color;
+      const selected = state.currentZoneId === z.id && state.selKeyT != null && Math.abs(k.t - state.selKeyT) < 1e-6;
+      if (selected) el.classList.add("selected");
+      el.dataset.zone = z.id;
+      el.dataset.t = String(k.t);
+      el.title = k.t >= 1e8 ? "\u221E" : fmtTime(k.t);
+      el.style.left = (Math.min(k.t, dur) / dur) * 100 + "%";
+      el.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        selectKey(z, k);
+        beginKeyDrag(e, z, k);
+      });
+      keyTrack.appendChild(el);
+    });
+  });
+  updateKeyPlayhead();
+}
+
+function selectKey(z, k) {
+  state.currentZoneId = z.id;
+  state.selKeyT = k.t;
+  applySelection();
+  updateZoneProps();
+  buildKeyTrack();
+  const dur = trackDuration();
+  if (video.duration) video.currentTime = Math.min(k.t, Math.max(0, dur - 0.001));
+  timeline.value = video.duration ? (video.currentTime / video.duration) * 1000 : 0;
+  redraw();
+}
+
+function beginKeyDrag(e, zone, keyRef) {
+  const wrap = keyTrackWrap;
+  const startX = e.clientX;
+  const startT = keyRef.t;
+  const dur = trackDuration();
+  const onMove = (ev) => {
+    const rect = wrap.getBoundingClientRect();
+    const t = clamp(startT + ((ev.clientX - startX) / Math.max(1, rect.width)) * dur, 0, 1e9);
+    keyRef.t = t;
+    state.selKeyT = t;
+    zone.keys = window.CropMath.sortKeys(zone.keys);
+    buildKeyTrack();
+    scheduleSave();
+  };
+  const onUp = () => {
+    removeEventListener("pointermove", onMove);
+    removeEventListener("pointerup", onUp);
+    buildKeyTrack();
+    saveConfigNow();
+  };
+  addEventListener("pointermove", onMove);
+  addEventListener("pointerup", onUp);
+}
+
+keyTrack.addEventListener("pointerdown", (e) => {
+  if (e.target.classList.contains("keyMarker")) return;
+  const z = selectedZone();
+  if (!z) return;
+  const rect = keyTrackWrap.getBoundingClientRect();
+  const t = clamp(((e.clientX - rect.left) / Math.max(1, rect.width)) * trackDuration(), 0, trackDuration());
+  addKeyAt(z, t);
+});
+
+async function addKeyAt(z, t) {
+  const time = clamp(t, 0, trackDuration());
+  const crop = cropAtTime(z, time);
+  z.keys = window.CropMath.sortKeys((window.CropMath.zoneKeys(z)).concat({ t: time, crop }));
+  state.selKeyT = time;
+  buildKeyTrack();
+  redraw();
+  scheduleSave();
+}
+
+async function removeKey() {
+  const z = selectedZone();
+  if (!z || state.selKeyT == null) return;
+  let ks = window.CropMath.sortKeys(z.keys);
+  ks = ks.filter((k) => Math.abs(k.t - state.selKeyT) >= 1e-6);
+  if (ks.length === 0) {
+    const c = z.crop && z.crop.w > 0 ? z.crop : { x: 0, y: 0, w: 1, h: 1 };
+    ks = [{ t: 0, crop: { ...c } }, { t: 1e9, crop: { ...c } }];
+  } else if (ks.length === 1) {
+    ks = [{ t: 0, crop: { ...ks[0].crop } }, { t: 1e9, crop: { ...ks[0].crop } }];
+  }
+  z.keys = ks;
+  state.selKeyT = null;
+  buildKeyTrack();
+  redraw();
+  scheduleSave();
+}
+
+btnDelKey.addEventListener("click", removeKey);
+
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target && e.target.tagName) || "";
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (state.selKeyT == null) return;
+  if (e.key === "Delete" || e.key === "Backspace") {
+    e.preventDefault();
+    removeKey();
+  }
+});
+
+function updateKeyPlayhead() {
+  const dur = trackDuration();
+  keyTrackPlayhead.style.left = (clamp(video.currentTime || 0, 0, dur) / dur) * 100 + "%";
+}
+
+function updateZoneProps() {
+  const z = selectedZone();
+  if (!z) {
+    zoneProps.hidden = true;
+    return;
+  }
+  zoneProps.hidden = false;
+  zoneLabel.value = z.label || "";
+  zoneLabelEn.value = z.labelEn || "";
+  zoneColor.value = /^#[0-9a-fA-F]{6}$/.test(z.color || "") ? z.color : "#9147ff";
+  zoneOx.value = z.out.x;
+  zoneOy.value = z.out.y;
+  zoneOw.value = z.out.w;
+  zoneOh.value = z.out.h;
+  const t = currentTemplate();
+  const idx = zoneIndex();
+  btnZoneUp.disabled = idx <= 0;
+  btnZoneDown.disabled = !t || idx >= t.zones.length - 1;
+}
+
+// ---------- zone list ----------
+
+function buildZoneList() {
+  const t = currentTemplate();
+  zoneList.innerHTML = "";
+  if (!t) return;
+  t.zones.forEach((z, i) => {
+    const tag = document.createElement("span");
+    tag.className = "zoneTag";
+    tag.dataset.id = z.id;
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = z.color;
+    tag.appendChild(sw);
+    tag.appendChild(document.createTextNode(String(i + 1) + ". " + (window.I18n.locLabel(z) || z.id)));
+    tag.addEventListener("click", () => selectZone(z.id));
+    zoneList.appendChild(tag);
+  });
+  applySelection();
+}
+
+function updateRectLabels() {
+  const t = currentTemplate();
+  if (!t) return;
+  t.zones.forEach((z) => {
+    const el = state.rects.get(z.id);
+    const ol = state.outRects.get(z.id);
+    const label = window.I18n.locLabel(z) || z.id;
+    if (el) {
+      const l = el.querySelector(".label");
+      if (l) l.textContent = label;
+    }
+    if (ol && ol.querySelector(".out-label")) {
+      const idx = t.zones.findIndex((v) => v.id === z.id);
+      ol.querySelector(".out-label").textContent = String(idx + 1);
+    }
+  });
+}
+
+function uniqueZoneId(t, base) {
+  let n = 1;
+  let id;
+  do {
+    id = base + "_" + n;
+    n++;
+  } while (t.zones.some((z) => z.id === id));
+  return id;
+}
+
+function cropForOut(out) {
+  if (!video.videoWidth) return { x: 0, y: 0, w: 1, h: 1 };
+  const aspect = window.CropMath.zoneAspectNorm(out, video.videoWidth, video.videoHeight);
+  return window.CropMath.centerCropForAspect(aspect);
+}
+
+// ---------- zone CRUD ----------
+
+async function addZone() {
+  const t = currentTemplate();
+  if (!t) return;
+  const c = currentCanvasSize();
+  const idx = t.zones.length;
+  const out = window.CropMath.placeNewZoneRect(c.w, c.h, idx);
+  const n = idx + 1;
+  const crop = cropForOut(out);
+  t.zones.push({
+    id: uniqueZoneId(t, "zone"),
+    label: "\u0417\u043E\u043D\u0430 " + n,
+    labelEn: "Zone " + n,
+    color: ZONE_PALETTE[idx % ZONE_PALETTE.length],
+    out,
+    crop,
+    keys: [
+      { t: 0, crop: { ...crop } },
+      { t: 1e9, crop: { ...crop } },
+    ],
+  });
+  rebuildRectLayer();
+  rebuildOutLayer();
+  buildZoneList();
+  buildLegend();
+  selectZone(t.zones[t.zones.length - 1].id);
+  redraw();
+  updateRenderEnabled();
+  await saveConfigNow();
+}
+
+async function deleteZone() {
+  const t = currentTemplate();
+  const z = selectedZone();
+  if (!t || !z) return;
+  if (!window.confirm(window.I18n.i18n("confirmDeleteZone") + (window.I18n.locLabel(z) || z.id) + "?")) return;
+  t.zones = t.zones.filter((v) => v.id !== z.id);
+  state.currentZoneId = null;
+  rebuildTemplateUI();
+  await saveConfigNow();
+}
+
+async function moveZone(dir) {
+  const t = currentTemplate();
+  const idx = zoneIndex();
+  if (!t || idx < 0) return;
+  const j = idx + dir;
+  if (j < 0 || j >= t.zones.length) return;
+  const arr = t.zones;
+  const moved = arr[idx];
+  arr[idx] = arr[j];
+  arr[j] = moved;
+  state.currentZoneId = moved.id;
+  rebuildTemplateUI();
+  updateZoneProps();
+  await saveConfigNow();
+}
+
+function applyOutToZone(z, val) {
+  const c = currentCanvasSize();
+  Object.assign(z.out, window.CropMath.fitOutRect(val, c.w, c.h, MIN_OUT, MIN_OUT));
+  positionOutRects();
+  if (video.videoWidth) {
+    const aspect = window.CropMath.zoneAspectNorm(z.out, video.videoWidth, video.videoHeight);
+    z.crop = window.CropMath.reshapeToAspect(z.crop, aspect);
+    positionRect(z);
+  }
+  redraw();
+  updateZoneProps();
+  saveConfigNow();
+}
+
+btnAddZone.addEventListener("click", addZone);
+btnDelZone.addEventListener("click", deleteZone);
+btnZoneUp.addEventListener("click", () => moveZone(-1));
+btnZoneDown.addEventListener("click", () => moveZone(1));
+
+zoneLabel.addEventListener("input", () => {
+  const z = selectedZone();
+  if (!z) return;
+  z.label = zoneLabel.value;
+  updateRectLabels();
+  buildZoneList();
+  buildLegend();
+  redraw();
+  scheduleSave();
+});
+
+zoneLabelEn.addEventListener("input", () => {
+  const z = selectedZone();
+  if (!z) return;
+  z.labelEn = zoneLabelEn.value;
+  updateRectLabels();
+  buildZoneList();
+  buildLegend();
+  redraw();
+  scheduleSave();
+});
+
+zoneColor.addEventListener("input", () => {
+  const z = selectedZone();
+  if (!z) return;
+  z.color = zoneColor.value;
+  stColor(z);
+  buildZoneList();
+  buildLegend();
+  redraw();
+  scheduleSave();
+});
+
+function stColor(z) {
+  const cropEl = state.rects.get(z.id);
+  const outEl = state.outRects.get(z.id);
+  if (cropEl) cropEl.style.setProperty("--rcolor", z.color);
+  if (outEl) outEl.style.setProperty("--rcolor", z.color);
+}
+
+[zoneOx, zoneOy, zoneOw, zoneOh].forEach((input) => {
+  input.addEventListener("change", () => {
+    const z = selectedZone();
+    if (!z) return;
+    applyOutToZone(z, {
+      x: +zoneOx.value || 0,
+      y: +zoneOy.value || 0,
+      w: +zoneOw.value || MIN_OUT,
+      h: +zoneOh.value || MIN_OUT,
+    });
+  });
+});
+
+// ---------- template name editing ----------
+
+function updateTemplateNameInputs() {
+  const t = currentTemplate();
+  tplName.value = t && t.name ? t.name : "";
+  tplNameEn.value = t && t.nameEn ? t.nameEn : "";
+}
+
+function updateTabLabel(id, label) {
+  const btn = templateTabs.querySelector('button[data-id="' + id + '"]');
+  if (btn) btn.textContent = label;
+}
+
+tplName.addEventListener("input", () => {
+  const t = currentTemplate();
+  if (!t) return;
+  t.name = tplName.value;
+  updateTabLabel(state.currentId, window.I18n.locName(t) || state.currentId);
+  scheduleSave();
+});
+
+tplNameEn.addEventListener("input", () => {
+  const t = currentTemplate();
+  if (!t) return;
+  t.nameEn = tplNameEn.value;
+  updateTabLabel(state.currentId, window.I18n.locName(t) || state.currentId);
+  scheduleSave();
+});
+
 // ---------- persistence ----------
 
 function sanitizeZonesForSave(t) {
@@ -300,6 +919,15 @@ function sanitizeZonesForSave(t) {
       w: clamp(z.crop.w, 0.01, 1),
       h: clamp(z.crop.h, 0.01, 1),
     },
+    keys: window.CropMath.sortKeys(z.keys).map((k) => ({
+      t: k.t,
+      crop: {
+        x: clamp(k.crop.x, 0, 1),
+        y: clamp(k.crop.y, 0, 1),
+        w: clamp(k.crop.w, 0.01, 1),
+        h: clamp(k.crop.h, 0.01, 1),
+      },
+    })),
   }));
 }
 
@@ -314,8 +942,13 @@ function saveConfigNow() {
     saveTimer = null;
   }
   const t = currentTemplate();
-  if (!t) return;
-  window.api.saveConfig(state.currentId, sanitizeZonesForSave(t));
+  if (!t) return Promise.resolve();
+  return window.api.saveTemplate(state.currentId, {
+    name: t.name,
+    nameEn: t.nameEn,
+    canvas: t.canvas || { width: 1080, height: 1920 },
+    zones: sanitizeZonesForSave(t),
+  });
 }
 
 // ---------- output preview ----------
@@ -341,7 +974,7 @@ function drawOutput() {
     outCtx.strokeRect(x + 1, y + 1, w - 2, h - 2);
 
     if (videoReady) {
-      const src = window.CropMath.zoneSrcRect(z.crop, video.videoWidth, video.videoHeight, z.out);
+      const src = window.CropMath.zoneSrcRect(cropAtTime(z, video.currentTime), video.videoWidth, video.videoHeight, z.out);
       try {
         outCtx.drawImage(video, src.sx, src.sy, src.sw, src.sh, x, y, w, h);
         outCtx.globalAlpha = 0.12;
@@ -377,6 +1010,8 @@ function startLoop() {
   if (rafId) return;
   const loop = () => {
     drawOutput();
+    repositionAll();
+    updateKeyPlayhead();
     rafId = requestAnimationFrame(loop);
   };
   rafId = requestAnimationFrame(loop);
@@ -413,6 +1048,7 @@ async function loadVideo() {
 video.addEventListener("loadedmetadata", () => {
   shapeCropsToZoneAspect();
   rebuildRectLayer();
+  buildKeyTrack();
   timeline.disabled = false;
   timeline.max = 1000;
   timeline.value = 0;
@@ -483,10 +1119,14 @@ video.addEventListener("timeupdate", () => {
     timeline.value = (video.currentTime / video.duration) * 1000;
     timeLabel.textContent = fmtTime(video.currentTime) + " / " + fmtTime(video.duration);
   }
+  updateKeyPlayhead();
 });
 
 timeline.addEventListener("input", () => {
   if (video.duration) video.currentTime = (timeline.value / 1000) * video.duration;
+  repositionAll();
+  updateKeyPlayhead();
+  redraw();
 });
 
 // ---------- render ----------
@@ -591,6 +1231,7 @@ function applyResolution() {
   outCanvas.width = state.res.w;
   outCanvas.height = state.res.h;
   outCanvas.style.aspectRatio = state.res.w + " / " + state.res.h;
+  layoutOutStage();
   redraw();
   updateRenderEnabled();
 }
@@ -625,6 +1266,18 @@ function askName(title) {
 async function reloadAndSwitch(newId) {
   await initTabs();
   if (newId && state.templates[newId]) switchTemplate(newId);
+  if (!state.currentId) {
+    state.currentZoneId = null;
+    state.selKeyT = null;
+    rebuildRectLayer();
+    rebuildOutLayer();
+    buildZoneList();
+    buildLegend();
+    buildKeyTrack();
+    updateTemplateNameInputs();
+    updateZoneProps();
+    redraw();
+  }
   updateRenderEnabled();
 }
 
@@ -656,6 +1309,11 @@ btnDelTemplate.addEventListener("click", async () => {
 // ---------- init ----------
 
 new ResizeObserver(() => {
+  layoutOutStage();
+  redraw();
+}).observe(canvasWrap);
+
+new ResizeObserver(() => {
   repositionAll();
   redraw();
 }).observe(stage);
@@ -666,6 +1324,8 @@ btnLoadVideo.addEventListener("click", loadVideo);
   window.I18n.initI18n();
   initResolution();
   await initTabs();
+  layoutOutStage();
+  buildKeyTrack();
   loadOverlay();
 })();
 
@@ -673,8 +1333,16 @@ document.addEventListener("langchange", () => {
   initTabs();
   if (state.currentId) {
     rebuildRectLayer();
+    rebuildOutLayer();
+    buildZoneList();
     buildLegend();
+    buildKeyTrack();
+    updateTemplateNameInputs();
+    updateZoneProps();
     redraw();
   }
+  templateTabs.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.id === state.currentId);
+  });
   updateRenderEnabled();
 });

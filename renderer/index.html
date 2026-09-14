@@ -38,6 +38,14 @@
           <video id="sourceVideo" preload="metadata"></video>
           <div id="rectLayer"></div>
         </div>
+        <div id="keyTrackBar">
+          <span id="keyTrackTip" class="muted" data-i18n="keyTrackTitle">Keyframes: click to add, drag to move, Del to remove</span>
+          <div id="keyTrackWrap">
+            <div id="keyTrack"></div>
+            <div id="keyTrackPlayhead"></div>
+          </div>
+          <button id="btnDelKey" class="danger small" data-i18n="deleteKey" title="Delete keyframe" hidden>&#10005;</button>
+        </div>
         <div id="playback">
           <button id="btnPlay" data-i18n-title="playPauseTitle" title="Play / pause">▶</button>
           <input id="timeline" type="range" min="0" max="1000" value="0" disabled />
@@ -50,6 +58,38 @@
         <div class="sectionTitle" data-i18n="outputTitle">Output template preview (canvas grid 1080×1920)</div>
         <div id="canvasWrap">
           <canvas id="outputCanvas" width="1080" height="1920"></canvas>
+          <div id="outRectLayer"></div>
+        </div>
+        <div class="outHint muted" data-i18n="outHint">Click / drag zones on the canvas to arrange the layout</div>
+        <div id="zonePanel">
+          <div id="tplNameRow">
+            <input id="tplName" type="text" data-i18n-title="templateName" title="Template name" />
+            <input id="tplNameEn" type="text" data-i18n-title="templateNameEn" title="Template name (EN)" />
+            <button id="btnAddZone" data-i18n="addZone">➕ Add zone</button>
+          </div>
+          <div id="zoneList"></div>
+          <div id="zoneProps" hidden>
+            <div class="propGrid">
+              <label data-i18n="zoneLabel">Label</label>
+              <input id="zoneLabel" type="text" />
+              <label data-i18n="zoneLabelEn">Label (EN)</label>
+              <input id="zoneLabelEn" type="text" />
+              <label data-i18n="zoneColor">Color</label>
+              <input id="zoneColor" type="color" />
+              <label data-i18n="outCoords">Position</label>
+              <div id="outCoords">
+                <input id="zoneOx" type="number" step="1" />
+                <input id="zoneOy" type="number" step="1" />
+                <input id="zoneOw" type="number" step="1" />
+                <input id="zoneOh" type="number" step="1" />
+              </div>
+            </div>
+            <div class="propBtns">
+              <button id="btnZoneUp" data-i18n="moveUp" title="▲">▲</button>
+              <button id="btnZoneDown" data-i18n="moveDown" title="▼">▼</button>
+              <button id="btnDelZone" class="danger" data-i18n="deleteZone">Delete zone</button>
+            </div>
+          </div>
         </div>
       </section>
     </main>

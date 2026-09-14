@@ -10,6 +10,7 @@ const {
   buildRenderArgs,
 } = require("./lib/ffmpeg-graph");
 const { ffmpegPath } = require("./lib/ffmpeg-path");
+const CropMath = require("./renderer/shared-crop");
 
 const CONFIG_DIR = path.join(__dirname, "config");
 const ASSETS_DIR = path.join(__dirname, "assets");
@@ -201,7 +202,9 @@ ipcMain.handle("config:list", () => {
     const id = path.basename(file, ".json");
     if (!safeId(id)) continue;
     try {
-      out[id] = JSON.parse(fs.readFileSync(file, "utf8"));
+      const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+      migrateTemplate(raw, file);
+      out[id] = raw;
       out[id].id = id;
     } catch (e) {
       out[id] = { error: String(e), id };
@@ -210,7 +213,104 @@ ipcMain.handle("config:list", () => {
   return out;
 });
 
-ipcMain.handle("config:save", (_evt, { id, zones }) => {
+// Лёгкая миграция шаблона в актуальный формат на чтение: версия + ключи для зон.
+function migrateTemplate(t, filePath) {
+  if (t && typeof t === "object") {
+    t.version = t.version || 1;
+    if (t.version === 1 && Array.isArray(t.zones)) {
+      const cw = (t.canvas && t.canvas.width) || 1080;
+      const ch = (t.canvas && t.canvas.height) || 1920;
+      let changed = false;
+      t.zones.forEach((z) => {
+        if (!z) return;
+        const keys = sanitizeKeys(z.keys, z.crop, cw, ch);
+        if (!Array.isArray(z.keys) || z.keys.length !== keys.length) changed = true;
+        z.keys = keys;
+      });
+      if (changed && filePath) {
+        t.version = 2;
+        try {
+          writeTemplate(filePath, t);
+        } catch (_) {
+          /* не критично, сохранится при следующем save */
+        }
+      } else {
+        t.version = 2;
+      }
+    }
+  }
+  return t;
+}
+
+function sanitizeCrop(c) {
+  return {
+    x: clampVal(c && c.x, 0, 1),
+    y: clampVal(c && c.y, 0, 1),
+    w: clampVal(c && c.w, 0.01, 1),
+    h: clampVal(c && c.h, 0.01, 1),
+  };
+}
+
+// Валидация списка ключей: сортировка по t, схлопывание одинаковых t,
+// минимум 2 ключа (уникальный пресет из базового кропа, статично).
+function sanitizeKeys(keys, baseCrop, cw, ch) {
+  const def = sanitizeCrop(baseCrop);
+  if (def.w === 0.01 && def.h === 0.01) def.w = def.h = 0.5; // вырожденный кроп
+  def.w = Math.min(1, def.w);
+  def.h = Math.min(1, def.h);
+  let arr = (Array.isArray(keys) ? keys : []).map((k) => ({
+    t: clampVal(k && k.t, 0, 1e9),
+    crop: sanitizeCrop(k && k.crop),
+  }));
+  arr.sort((a, b) => a.t - b.t);
+  arr = arr.filter((k, i) => {
+    if (i === 0) return true;
+    return Math.abs(k.t - arr[i - 1].t) > 1e-9;
+  });
+  if (arr.length === 0) {
+    arr = [
+      { t: 0, crop: { ...def } },
+      { t: 1e9, crop: { ...def } },
+    ];
+  } else if (arr.length === 1) {
+    arr.push({ t: 1e9, crop: { ...arr[0].crop } });
+  }
+  return arr;
+}
+
+function sanitizeTemplateData(template, cw, ch) {
+  const zones = Array.isArray(template.zones) ? template.zones : [];
+  return {
+    version: 2,
+    name: typeof template.name === "string" && template.name.trim() ? template.name.trim() : "Template",
+    nameEn: typeof template.nameEn === "string" && template.nameEn.trim() ? template.nameEn.trim() : template.name || "Template",
+    canvas: { width: cw, height: ch },
+    zones: zones.map((z) => {
+      const color = z && /^#[0-9a-fA-F]{3,8}$/.test(String(z.color || "")) ? z.color : "#9147ff";
+      const out = CropMath.fitOutRect(
+        { x: +(z.out && z.out.x) || 0, y: +(z.out && z.out.y) || 0, w: +(z.out && z.out.w) || 0, h: +(z.out && z.out.h) || 0 },
+        cw, ch, 16, 16
+      );
+      const crop = sanitizeCrop(z && z.crop);
+      return {
+        id: String(z.id || "zone"),
+        label: String(z.label || z.id || "Zone"),
+        labelEn: String(z.labelEn || z.label || z.id || "Zone"),
+        color,
+        out,
+        crop,
+        keys: sanitizeKeys(z && z.keys, crop, cw, ch),
+      };
+    }),
+  };
+}
+
+function clampVal(v, lo, hi) {
+  if (typeof v !== "number" || !Number.isFinite(v)) return lo;
+  return Math.min(hi, Math.max(lo, v));
+}
+
+ipcMain.handle("config:save-template", (_evt, { id, template }) => {
   const file = templatePath(id);
   if (!file || !fs.existsSync(file)) return { ok: false, error: "unknown template" };
   let current = {};
@@ -219,9 +319,11 @@ ipcMain.handle("config:save", (_evt, { id, zones }) => {
   } catch (_) {
     /* keep defaults */
   }
-  current.zones = zones;
+  const cw = current.canvas && current.canvas.width || 1080;
+  const ch = current.canvas && current.canvas.height || 1920;
+  const merged = sanitizeTemplateData(template || {}, cw, ch);
   try {
-    fs.writeFileSync(file, JSON.stringify(current, null, 2), "utf8");
+    writeTemplate(file, merged);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: String(e) };

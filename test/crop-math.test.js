@@ -2,7 +2,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert");
-const { zoneSrcRect, zoneAspectNorm, fitRectToAspect, reshapeToAspect, resizeWithAspect, scaleZones } =
+const { zoneSrcRect, zoneAspectNorm, fitRectToAspect, reshapeToAspect, resizeWithAspect, scaleZones, centerCropForAspect, fitOutRect, placeNewZoneRect, zoneKeys, sortKeys, interpCropN, keysAreStatic } =
   require("../renderer/shared-crop");
 
 const approx = (a, b, eps = 0.02) => Math.abs(a - b) < eps;
@@ -182,4 +182,121 @@ test("scaleZones: 1080x1920 -> 1080x1080 ограничивает зоны в р
   assert.ok(r[0].out.h <= 1080, "высота клампится к 1080");
   assert.strictEqual(r[0].out.x, 0);
   assert.strictEqual(r[0].out.y, 0);
+});
+
+// ---------- centerCropForAspect (дефолтный кроп новой зоны) ----------
+
+test("centerCropForAspect: квадрат из 16:9 исходника — максимальный центрированный", () => {
+  const r = centerCropForAspect(zoneAspectNorm({ w: 1080, h: 1080 }, 1920, 1080)); // 0.5625
+  assert.ok(approx(r.w / r.h, 0.5625, 0.001), "норм. аспект сохранён");
+  assert.ok(r.h >= 0.999 && r.h <= 1, "заполняет высоту кадра");
+  assert.ok(approx(r.x, (1 - r.w) / 2, 0.001), "по центру по горизонтали");
+  assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= 1.0001 && r.y + r.h <= 1.0001, "в кадре");
+});
+
+test("centerCropForAspect: вертикальная зона 9:16 центрируется по обеим осям", () => {
+  const aspect = zoneAspectNorm({ w: 540, h: 1380 }, 1280, 720); // (540/1380)*(720/1280)
+  const r = centerCropForAspect(aspect);
+  assert.ok(approx(r.w / r.h, aspect, 0.001), "норм. аспект");
+  assert.ok(approx(r.x, (1 - r.w) / 2, 0.001) && approx(r.y, (1 - r.h) / 2, 0.001), "центрирован");
+  assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= 1.0001 && r.y + r.h <= 1.0001, "в кадре");
+});
+
+// ---------- fitOutRect (кламп out в холст) ----------
+
+test("fitOutRect: координаты за краями поджимаются в холст, размерно сохраняется", () => {
+  const r = fitOutRect({ x: -50, y: 2500, w: 1200, h: 300 }, 1080, 1920, 16, 16);
+  assert.strictEqual(r.x, 0);
+  assert.strictEqual(r.y, 1620);
+  assert.strictEqual(r.w, 1080);
+  assert.strictEqual(r.h, 300);
+});
+
+test("fitOutRect: размер меньше минимума расширяется до минимума", () => {
+  const r = fitOutRect({ x: 0, y: 0, w: 2, h: 2 }, 1080, 1920, 16, 16);
+  assert.ok(r.w >= 16 && r.h >= 16, "не меньше минимума");
+});
+
+test("fitOutRect: производит целые пиксели", () => {
+  const r = fitOutRect({ x: 12.6, y: 33.3, w: 500.9, h: 700.1 }, 1080, 1920, 16, 16);
+  assert.ok(Number.isInteger(r.x) && Number.isInteger(r.y) && Number.isInteger(r.w) && Number.isInteger(r.h));
+});
+
+// ---------- placeNewZoneRect (дефолтная раскладка новой зоны) ----------
+
+test("placeNewZoneRect: зона помещается в холст и занимает пол-холста", () => {
+  const r = placeNewZoneRect(1080, 1920, 0);
+  assert.strictEqual(r.w, 540);
+  assert.strictEqual(r.h, 960);
+  assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= 1080 && r.y + r.h <= 1920, "в холсте");
+});
+
+test("placeNewZoneRect: последовательные зоны не совпадают позициями (каскад)", () => {
+  const a = placeNewZoneRect(1080, 1920, 0);
+  const b = placeNewZoneRect(1080, 1920, 1);
+  const c = placeNewZoneRect(1080, 1920, 2);
+  assert.notDeepStrictEqual(a, b);
+  assert.notDeepStrictEqual(b, c);
+});
+
+// ---------- zoneKeys / sortKeys ----------
+
+test("zoneKeys: старая зона без keys мигрирует в 2 идентичных ключа", () => {
+  const z = { crop: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } };
+  const keys = zoneKeys(z);
+  assert.strictEqual(keys.length, 2);
+  assert.strictEqual(keys[0].t, 0);
+  assert.strictEqual(keys[1].t, 1e9);
+  assert.deepStrictEqual(keys[0].crop, keys[1].crop);
+  assert.deepStrictEqual(keys[0].crop, z.crop);
+});
+
+test("zoneKeys: сортировка по t и схлопывание одинаковых t (оставляем первый)", () => {
+  const z = { keys: [{ t: 5, crop: { x: 0, y: 0, w: 1, h: 1 } }, { t: 1, crop: { x: 0, y: 0, w: 1, h: 1 } }, { t: 1, crop: { x: 0.5, y: 0.5, w: 0.5, h: 0.5 } }] };
+  const keys = zoneKeys(z);
+  assert.strictEqual(keys.length, 2);
+  assert.strictEqual(keys[0].t, 1);
+  assert.strictEqual(keys[0].crop.x, 0); // первый из двух с t=1
+  assert.strictEqual(keys[1].t, 5);
+});
+
+// ---------- interpCropN ----------
+
+test("interpCropN: 2 ключа — линейная интерполяция x,y,w,h", () => {
+  const keys = [
+    { t: 0, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } },
+    { t: 10, crop: { x: 0.5, y: 1, w: 1, h: 1 } },
+  ];
+  assert.deepStrictEqual(interpCropN(keys, 5), { x: 0.25, y: 0.5, w: 0.75, h: 0.75 });
+});
+
+test("interpCropN: до первого ключа и после последнего — значение крайнего", () => {
+  const keys = [
+    { t: 2, crop: { x: 0, y: 0, w: 0.2, h: 0.2 } },
+    { t: 8, crop: { x: 0.8, y: 0.8, w: 0.2, h: 0.2 } },
+  ];
+  assert.deepStrictEqual(interpCropN(keys, 0), keys[0].crop);
+  assert.deepStrictEqual(interpCropN(keys, 10), keys[1].crop);
+});
+
+test("interpCropN: 3 ключа — кусочно-линейно", () => {
+  const keys = [
+    { t: 0, crop: { x: 0, y: 0, w: 0.2, h: 0.2 } },
+    { t: 5, crop: { x: 0.5, y: 0.5, w: 0.5, h: 0.5 } },
+    { t: 10, crop: { x: 1, y: 1, w: 1, h: 1 } },
+  ];
+  assert.deepStrictEqual(interpCropN(keys, 0), keys[0].crop);
+  assert.deepStrictEqual(interpCropN(keys, 5), keys[1].crop);
+  assert.deepStrictEqual(interpCropN(keys, 10), keys[2].crop);
+  const mid = interpCropN(keys, 2.5);
+  assert.ok(approx(mid.x, 0.25), "сегмент 0–5: x");
+  assert.ok(approx(mid.w, 0.35), "сегмент 0–5: w");
+  assert.ok(approx(interpCropN(keys, 7.5).x, 0.75), "сегмент 5–10: x");
+});
+
+// ---------- keysAreStatic ----------
+
+test("keysAreStatic: true когда все ключи совпадают по значениям", () => {
+  assert.ok(keysAreStatic([{ t: 0, crop: { x: 0.1, y: 0, w: 1, h: 1 } }, { t: 10, crop: { x: 0.1, y: 0, w: 1, h: 1 } }]));
+  assert.ok(!keysAreStatic([{ t: 0, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } }, { t: 10, crop: { x: 0.5, y: 0.5, w: 1, h: 1 } }]));
 });

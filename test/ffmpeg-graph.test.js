@@ -10,6 +10,8 @@ const {
   cropPixelValues,
   buildFilterGraph,
   buildRenderArgs,
+  lerpExpr,
+  buildAnimatedZoneChain,
 } = require("../lib/ffmpeg-graph");
 
 const ROOT = path.join(__dirname, "..");
@@ -240,4 +242,53 @@ test("buildRenderArgs: tw-оверлей добавляется третьим �
 test("probeVideo: распознаёт тестовый файл (или ошибка при отсутствии ffprobe)", (t) => {
   const ff = probeVideo("/definitely/not/here.mp4");
   assert.ok(ff.error !== undefined);
+});
+
+// ---------- lerpExpr / buildAnimatedZoneChain ----------
+
+test("lerpExpr: 2 точки — clip-линейная интерполяция", () => {
+  const e = lerpExpr([0, 100], [0, 10], "in_time");
+  assert.match(e, /^clip\(0\+\(10\)\*\(in_time-0\),0,100\)$/);
+});
+
+test("lerpExpr: 3 точки — кусочно-линейно с корректными границами", () => {
+  const e = lerpExpr([0, 50, 100], [0, 5, 10], "t");
+  assert.match(e, /\(0\)\*lte\(t,0\)/);
+  assert.match(e, /\*gt\(t,0\)\*lte\(t,5\)/);
+  assert.match(e, /\*gt\(t,5\)\*lte\(t,10\)/);
+  assert.match(e, /\(100\)\*gt\(t,10\)$/);
+});
+
+test("buildAnimatedZoneChain: pre-crop по аспекту + zoompan с линейными z/x/y выражениями", () => {
+  const zone = { out: { x: 0, y: 0, w: 1080, h: 1920 } };
+  const keys = [
+    { t: 0, crop: { x: 0.3418, y: 0, w: 0.3164, h: 1 } },
+    { t: 10, crop: { x: 0.4209, y: 0.25, w: 0.1582, h: 0.5 } },
+  ];
+  const chain = buildAnimatedZoneChain(zone, keys, 1920, 1080, "30/1");
+  assert.match(chain, /^crop=\d+:\d+:\d+:\d+,zoompan=z='clip\(/);
+  assert.match(chain, /x='clip\(/);
+  assert.match(chain, /y='clip\(/);
+  assert.match(chain, /:d=1:s=1080x1920:fps=30\/1$/);
+});
+
+test("buildFilterGraph: зона с 2 разными ключами — zoompan вместо scale/fore_aspect", () => {
+  const animated = [
+    { id: "a", out: { x: 0, y: 0, w: 1080, h: 1920 }, crop: { x: 0.3418, y: 0, w: 0.3164, h: 1 },
+      keys: [{ t: 0, crop: { x: 0.3418, y: 0, w: 0.3164, h: 1 } }, { t: 10, crop: { x: 0.4209, y: 0.25, w: 0.1582, h: 0.5 } }] },
+  ];
+  const g = buildFilterGraph({ vw: 1920, vh: 1080, fps: "30/1", duration: 10, canvasW: 1080, canvasH: 1920, zones: animated });
+  assert.match(g, /\[s0\]crop=.*zoompan=/);
+  assert.ok(!/force_original_aspect_ratio/.test(g), "анимированная зона не использует static scale-цепочку");
+  assert.match(g, /\[vout\]$/);
+});
+
+test("buildFilterGraph: зона с идентичными ключами остаётся статичной (scale/fore_aspect)", () => {
+  const staticZoom = [
+    { id: "a", out: { x: 0, y: 0, w: 1080, h: 1920 }, crop: { x: 0.3418, y: 0, w: 0.3164, h: 1 },
+      keys: [{ t: 0, crop: { x: 0.3418, y: 0, w: 0.3164, h: 1 } }, { t: 10, crop: { x: 0.3418, y: 0, w: 0.3164, h: 1 } }] },
+  ];
+  const g = buildFilterGraph({ vw: 1920, vh: 1080, fps: "30/1", duration: 10, canvasW: 1080, canvasH: 1920, zones: staticZoom });
+  assert.match(g, /\[s0\]crop=.*force_original_aspect_ratio=increase/);
+  assert.ok(!/zoompan/.test(g));
 });

@@ -208,6 +208,62 @@ section {
 
 #timeLabel { font-size: 12px; min-width: 120px; text-align: right; }
 
+/* ---------- keyframe track ---------- */
+
+#keyTrackBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 4px;
+}
+
+#keyTrackTip { font-size: 11px; white-space: nowrap; }
+
+#keyTrackWrap {
+  position: relative;
+  flex: 1;
+  height: 20px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: crosshair;
+  overflow: hidden;
+}
+
+#keyTrack { position: absolute; inset: 0; }
+
+.keyPlayhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.keyMarker {
+  position: absolute;
+  top: 3px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  box-sizing: border-box;
+  cursor: grab;
+  z-index: 2;
+}
+
+.keyMarker:hover { transform: scale(1.25); }
+
+.keyMarker.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px var(--rcolor, var(--accent));
+  z-index: 3;
+}
+
+#btnDelKey.small { padding: 4px 10px; font-size: 12px; }
+
 /* ---------- output canvas ---------- */
 
 #outputPanel { align-items: center; }
@@ -304,3 +360,190 @@ section {
   color: #fff;
   font-weight: 600;
 }
+
+/* ---------- output layout editor (out rects over canvas) ---------- */
+
+#canvasWrap { position: relative; }
+
+#outRectLayer {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.outRect {
+  position: absolute;
+  border: 2px solid var(--rcolor);
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+}
+
+.outRect.selected {
+  border: 2px dashed #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .6);
+}
+
+.outRect .out-label {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.outRect .handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1px solid #0c0c11;
+  border-radius: 2px;
+  pointer-events: auto;
+}
+
+.outRect .handle[data-h="nw"] { top: -6px;  left: -6px;  cursor: nwse-resize; }
+.outRect .handle[data-h="n"]  { top: -6px;  left: 50%;    margin-left: -5px; cursor: ns-resize;   }
+.outRect .handle[data-h="ne"] { top: -6px;  right: -6px; cursor: nesw-resize; }
+.outRect .handle[data-h="e"]  { top: 50%;   right: -6px; margin-top: -5px;  cursor: ew-resize;   }
+.outRect .handle[data-h="se"] { bottom: -6px; right: -6px; cursor: nwse-resize; }
+.outRect .handle[data-h="s"]  { bottom: -6px; left: 50%;   margin-left: -5px; cursor: ns-resize;  }
+.outRect .handle[data-h="sw"] { bottom: -6px; left: -6px;  cursor: nesw-resize; }
+.outRect .handle[data-h="w"]  { top: 50%;    left: -6px;  margin-top: -5px; cursor: ew-resize;  }
+
+.cropRect.selected { border: 2px dashed #fff; }
+
+/* ---------- zone editor panel ---------- */
+
+.outHint { font-size: 12px; }
+
+#zonePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+}
+
+#tplNameRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+#tplNameRow input {
+  flex: 1;
+  min-width: 120px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+#tplNameRow input:focus { outline: none; border-color: var(--accent); }
+
+#tplNameRow button {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#zoneList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+#zoneList .zoneTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#zoneList .zoneTag .swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+#zoneList .zoneTag.active {
+  border-color: var(--accent);
+  background: #2a2340;
+  font-weight: 600;
+}
+
+#zoneProps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.propGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 10px;
+  align-items: center;
+}
+
+.propGrid label { font-size: 12px; color: var(--muted); }
+.propGrid input[type="text"] {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+.propGrid input:focus { outline: none; border-color: var(--accent); }
+
+#zoneColor { width: 56px; height: 30px; padding: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
+
+#outCoords { display: flex; gap: 4px; }
+#outCoords input {
+  width: 62px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-size: 12px;
+}
+#outCoords input:focus { outline: none; border-color: var(--accent); }
+
+.propBtns { display: flex; gap: 6px; align-items: center; }
+.propBtns button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.propBtns button:hover:not(:disabled) { background: #30303a; }
+.propBtns button:disabled { opacity: .45; cursor: default; }
+.propBtns button.danger { color: var(--err); border-color: var(--err); }
+.propBtns button.danger:hover:not(:disabled) { background: rgba(248, 113, 113, .15); }
